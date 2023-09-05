@@ -1,0 +1,1043 @@
+---
+title: "Accidental_bycatch_explo"
+author: "Mathieu Brevet"
+format: html
+editor: source
+---
+
+```{r loading used packages and functions}
+
+# Coded on R version 4.3.0 ("Already Tomorrow"), Rstudio version "Cherry Blossom" (2023.03.0)
+
+library(ggplot2)
+
+library(data.table) #more efficient management of large data sets
+
+library(RVAideMemoire) #used for post-hoc tests in exploratory analyses
+
+library(stringr) # handling character string format in R
+
+
+
+
+library(randomForest)
+
+library(RRF) #regularized random forest
+
+
+```
+
+## Data acquisition
+
+```{r retrieve data}
+
+
+#First test with 2021 data
+
+
+
+
+
+
+#1) Declarative flow
+
+DECL_BYC=data.table()
+
+for (i in 2019:2022) {
+  setwd(paste0('~/Data/SACROIS/',i));
+  DECL_BYC<-rbind(fread(paste0("CAPTURES-ACC-IFR_",i,".txt"), dec=",", encoding="Latin-1", colClasses=c("SECT_COD_SACROIS_NIV5"="character")), DECL_BYC)
+}
+
+
+DCO_DECL_BYC<-DECL_BYC[DECL_BYC$ESP_LIB_FAO=="Dauphin commun",]
+
+
+#all data from 2019 to 2022: 108 declarations
+
+
+
+
+#2) OBSMER program
+
+
+setwd("~/Data/FREE2_OBSMER_serie")
+
+
+OBSMER_BYC_2021<-read.csv2("CAPTURES.csv", fileEncoding="ISO-8859-3")
+
+
+setDT(OBSMER_BYC_2021)
+
+
+
+OBSMER_BYC_2021=OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]
+
+
+
+
+
+
+strat<-read.csv2("STRATEGIE.csv", fileEncoding="ISO-8859-3")
+
+setDT(strat)
+
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, strat[,.(ID_VRAC,ID_OP)], by="ID_VRAC", all.x = T, all.y=F)
+
+
+
+
+operation<-read.csv2("OPERATION_PECHE.csv", fileEncoding="ISO-8859-3")
+
+setDT(operation)
+
+
+
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, operation[,.(ID_MAREE,ID_OP,ZONE)], by="ID_OP", all.x = T, all.y=F)
+
+
+OBSMER_BYC_2021=OBSMER_BYC_2021[ZONE %in% c("27.8.a","27.8.b"),]
+#another way of proceeding is to select all marees of vessels fishing at least in part in the bay of biscay (areas 27.8.a/27.8.b), using vessels ID present in the data_vessel dataset (see fleet definition works)
+
+
+
+
+#all data from 2003 to 2023: 160 declarations
+
+
+
+
+
+marees<-read.csv2("MAREE.csv", fileEncoding="ISO-8859-3")
+
+setDT(marees)
+
+
+
+OBSMER_BYC_2021=marees[ID_MAREE %in% OBSMER_BYC_2021[,ID_MAREE],]
+
+
+OBSMER_BYC_2021=OBSMER_BYC_2021[VALID_PROGRAMME=="Données valides",] # all the OBSMER data in 2023, are not validated yet
+
+
+
+
+#description of fishing marees implying accidental bycatch:
+
+
+
+table(OBSMER_BYC_2021$ANNEE) #few data between 2011 and 2014, no data before 2008 (although the program started in 2003?)
+
+
+table(OBSMER_BYC_2021$ANNEE)/table(marees$ANNEE)[names(table(marees$ANNEE)) %in% names(table(OBSMER_BYC_2021$ANNEE))] 
+
+
+
+t.test(OBSMER_BYC_2021$LONGUEUR,marees$LONGUEUR) #tendency of vessels a bit longer in case of dolphin bycatch ?
+t.test(as.numeric(OBSMER_BYC_2021$PUISSANCE),as.numeric(marees$PUISSANCE))
+
+#precise comparisons to only vessels operating in the Bay of Biscay?
+
+
+
+
+
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, operation[ID_MAREE %in% OBSMER_BYC_2021$ID_MAREE,], by="ID_MAREE", all = T)
+
+
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, strat[ID_OP %in% OBSMER_BYC_2021$ID_OP,], by="ID_OP", all = T)
+
+
+
+
+capture<-read.csv2("CAPTURES.csv", fileEncoding="ISO-8859-3")
+
+setDT(capture)
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, capture[ID_VRAC %in% OBSMER_BYC_2021$ID_VRAC,], by="ID_VRAC", all = T)
+
+
+
+
+
+
+mesure<-read.csv2("MESURES.csv", fileEncoding="ISO-8859-3")
+
+setDT(mesure)
+
+OBSMER_BYC_2021[, `:=`(TYPE.x = NULL , TYPE.y = NULL)]
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, mesure[ID_CAPTURE %in% OBSMER_BYC_2021$ID_CAPTURE,], by="ID_CAPTURE", all = T)
+
+
+
+
+
+
+
+
+#Distinguishing individuals measured separately (these individuals are currently not differentiated):
+
+
+setorder(OBSMER_BYC_2021, CRITERE)
+
+
+u=c()
+for (i in unique(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]$ID_CAPTURE)) {u=c(u,max(c(table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_CAPTURE==i,]$CRITERE),1)))}
+unique(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]$ID_CAPTURE)[u>1] #problematic captures
+
+
+
+OBSMER_BYC_2021$ID_IND=NA_character_
+
+
+
+
+
+for (i in 1:length(u)) {
+  for (j in 1:u[i]) {
+    OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_CAPTURE==unique(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]$ID_CAPTURE)[i],][which(!duplicated(CRITERE))+(j-1),]$ID_IND=
+      rep(
+        paste(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_CAPTURE==unique(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]$ID_CAPTURE)[i],]$ID_CAPTURE[1],j, sep="_"),
+        length(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_CAPTURE==unique(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]$ID_CAPTURE)[i],][which(!duplicated(CRITERE))+(j-1),]$ID_IND)
+          )
+  }
+}
+
+
+setorder(OBSMER_BYC_2021, ANNEE, ID_NAVIRE, ID_MAREE, ID_OP, ID_CAPTURE, ID_IND)
+
+
+
+
+#Attribution of number of captured dolphin per fishing sequence (incomplete aggregation presently):
+
+
+
+for (i in OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]$ID_CAPTURE) {
+  OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_CAPTURE==i,][is.na(NOMBRE.x),]$NOMBRE.x=
+    rep(sum(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_CAPTURE==i & !duplicated(ID_IND),]$NOMBRE.y), 
+        length(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_CAPTURE==i,][is.na(NOMBRE.x),]$NOMBRE.x)
+        )
+}
+
+
+
+
+
+
+OBSMER_BYC_2021$NOMBRE=NA_integer_
+
+
+
+for (i in OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]$ID_OP) {
+  OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==i,]$NOMBRE=
+    rep(sum(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==i & !duplicated(ID_CAPTURE),]$NOMBRE.x), 
+        length(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==i,]$NOMBRE)
+        )
+}
+
+
+
+
+#Attribution of the average weight of captured dolphin (incomplete aggregation presently):
+
+
+OBSMER_BYC_2021$POIDS_MOY=NA_real_
+
+
+OBSMER_BYC_2021$POIDS_REF.x=as.numeric(OBSMER_BYC_2021$POIDS_REF.x)
+OBSMER_BYC_2021$POIDS_REF.y=as.numeric(OBSMER_BYC_2021$POIDS_REF.y)
+
+
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][is.na(NOMBRE.y),]$POIDS_MOY=
+  OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][is.na(NOMBRE.y),]$POIDS_REF.x/OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][is.na(NOMBRE.y),]$NOMBRE.x
+
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!is.na(NOMBRE.y),][POIDS_REF.y!=0 & !is.na(POIDS_REF.y),]$POIDS_MOY=
+  OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!is.na(NOMBRE.y),][POIDS_REF.y!=0 & !is.na(POIDS_REF.y),]$POIDS_REF.y/OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!is.na(NOMBRE.y),][POIDS_REF.y!=0 & !is.na(POIDS_REF.y),]$NOMBRE.y
+
+
+
+for (i in OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!is.na(NOMBRE.y),][POIDS_REF.y==0 | is.na(POIDS_REF.y),]$ID_CAPTURE) {
+  OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!is.na(NOMBRE.y),][POIDS_REF.y==0 | is.na(POIDS_REF.y),][ID_CAPTURE==i,]$POIDS_MOY=
+    rep(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!is.na(NOMBRE.y),][POIDS_REF.y==0 | is.na(POIDS_REF.y),][ID_CAPTURE==i & !duplicated(ID_CAPTURE),]$POIDS_REF.x/OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!is.na(NOMBRE.y),][POIDS_REF.y==0 | is.na(POIDS_REF.y),][ID_CAPTURE==i & !duplicated(ID_CAPTURE),]$NOMBRE.x, length(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!is.na(NOMBRE.y),][POIDS_REF.y==0 | is.na(POIDS_REF.y),][ID_CAPTURE==i,]$POIDS_MOY))
+}
+
+
+
+
+
+OBSMER_BYC_2021[POIDS_MOY==0,]$POIDS_MOY=NA_real_
+
+
+
+# sometimes low declared weight ???
+
+
+
+
+
+
+
+
+
+
+
+
+#retrieving information available in comments:
+
+
+OBSMER_BYC_2021$IS_ALIVE=NA_character_
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep('mort|décomposition', COMMENTAIRE.y),][grep('D. delphis|D.delphis|dauphin commun|Delphinus delphis|delphinus delphis|dauphins communs|Delphinus delphi', COMMENTAIRE.y),]$COMMENTAIRE.y # the 11th observation is too uncertain => removed
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP %in% OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep('mort|décomposition', COMMENTAIRE.y),][grep('D. delphis|D.delphis|dauphin commun|Delphinus delphis|delphinus delphis|dauphins communs|Delphinus delphi', COMMENTAIRE.y),]$ID_OP[-11],]$IS_ALIVE="Dead"
+
+
+
+
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep('vivant', COMMENTAIRE.y),][grep('D. delphis|D.delphis|dauphin?[s] commun?[s]|Delphinus delphis|delphinus delphis|Delphinus delphi', COMMENTAIRE.y),]$COMMENTAIRE.y #the second observation do not concern a common dolphin
+
+
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP %in% OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep('vivant', COMMENTAIRE.y),][grep('D. delphis|D.delphis|dauphin?[s] commun?[s]|Delphinus delphis|delphinus delphis|Delphinus delphi', COMMENTAIRE.y),]$ID_OP[-2],]$IS_ALIVE="Alive"
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_MAREE=="17397815",]$IS_ALIVE="Alive" # indicated in Marees comments
+
+
+
+
+
+
+OBSMER_BYC_2021$IS_DISCARDED=NA
+
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep('rejeté?[s] directement|directement rejeté|avant manipulation|non remonté|pas remonté|pas été remonté|pas voulu remonter', COMMENTAIRE.y),][grep('D. delphis|D.delphis|dauphin?[s] commun?[s]|Delphinus delphis|delphinus delphis|Delphinus delphi', COMMENTAIRE.y),]$COMMENTAIRE.y
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep("(?<!non |n'est pas |pas été )remonté", COMMENTAIRE.y, perl=TRUE),][grep('D. delphis|D.delphis|dauphin?[s] commun?[s]|Delphinus delphis|delphinus delphis|Delphinus delphi', COMMENTAIRE.y),]$COMMENTAIRE.y
+
+
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP %in% OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep('rejeté?[s] directement|directement rejeté|avant manipulation|non remonté|pas remonté|pas été remonté|pas voulu remonter', COMMENTAIRE.y),][grep('D. delphis|D.delphis|dauphin?[s] commun?[s]|Delphinus delphis|delphinus delphis|Delphinus delphi', COMMENTAIRE.y),]$ID_OP[-2],]$IS_DISCARDED=TRUE
+
+
+
+
+
+
+
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_MAREE),][grep('banc|groupe|observation|saut', COMMENTAIRE.x),][grep('D. delphis|D.delphis|dauphin?[s] commun?[s]|Delphinus delphis|delphinus delphis|Delphinus delphi', COMMENTAIRE.x),]$COMMENTAIRE.x #rare observations of dolphin during maree (third case does not imply dolphins)
+
+
+
+
+
+
+
+#capture trace data recovery:
+
+
+OBSMER_BYC_2021$IS_CAPTURE_TRACE=NA_character_
+
+
+OBSMER_BYC_2021$CAPTURE_TRACE=NA_character_
+
+
+
+
+setdiff(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_MAREE),][grep("#", COMMENTAIRE.x),]$ID_MAREE, OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep("#", COMMENTAIRE.y),]$ID_MAREE) #data entirely present in the fishing operation  comment section except for one maree 
+
+
+
+str_extract_all(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep("#", COMMENTAIRE.y),]$COMMENTAIRE.y, "(?<=(?: |)Trace de capture(?: |):|trace_capture(?: |):).*?(?=#)")
+
+
+for (i in OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),][grep("#", COMMENTAIRE.y),][!(ID_OP %in% c(115146281,114956735)),]$ID_OP) {
+    OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==i,][!duplicated(ID_IND),]$IS_CAPTURE_TRACE=
+        unlist(str_extract_all(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==i & !duplicated(ID_OP),][grep("#", COMMENTAIRE.y),]$COMMENTAIRE.y, "(?<=(?: |)Trace de capture(?: |):|trace_capture(?: |):).*?(?=#)"))
+}
+
+
+
+ OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==115146281,][!duplicated(ID_IND),]$IS_CAPTURE_TRACE=
+        unlist(str_extract_all(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==115146281 & !duplicated(ID_OP),][grep("#", COMMENTAIRE.y),]$COMMENTAIRE.y, "(?<=(?: |)Trace de capture(?: |):|trace_capture(?: |):).*?(?=#)"))[1]
+
+
+
+ OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==114956735,][!duplicated(ID_IND),]$IS_CAPTURE_TRACE=
+        unlist(str_extract_all(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP==114956735 & !duplicated(ID_OP),][grep("#", COMMENTAIRE.y),]$COMMENTAIRE.y, "(?<=(?: |)Trace de capture(?: |):|trace_capture(?: |):).*?(?=#)"))[1]
+
+
+ 
+ OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_MAREE==18575023,][!duplicated(ID_IND),]$IS_CAPTURE_TRACE=
+        unlist(str_extract_all(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_MAREE==18575023 & !duplicated(ID_MAREE),][grep("#", COMMENTAIRE.x),]$COMMENTAIRE.x, "(?<=(?: |)Trace de capture(?: |):|trace_capture(?: |):).*?(?=#)"))[1]
+
+
+ 
+ 
+ 
+ OBSMER_BYC_2021[IS_CAPTURE_TRACE=="  ",]$IS_CAPTURE_TRACE=NA
+  OBSMER_BYC_2021[IS_CAPTURE_TRACE %in% c(" n "," N ","non"),]$IS_CAPTURE_TRACE=FALSE
+  OBSMER_BYC_2021[IS_CAPTURE_TRACE %in% c(" O ","oui"," Abrasion sur le rostre, lacérations pectorales, caudales "),]$IS_CAPTURE_TRACE=TRUE
+
+ 
+  
+  
+  
+  
+   
+ OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_MAREE==18575023,][!duplicated(ID_IND),]$CAPTURE_TRACE=
+        unlist(str_extract_all(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_MAREE==18575023 & !duplicated(ID_MAREE),][grep("#", COMMENTAIRE.x),]$COMMENTAIRE.x, "(?<=(?: |)Type de trace de capture(?: |):|type(?: |):).*?(?=#)"))
+
+
+  
+  
+  OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][IS_CAPTURE_TRACE=="TRUE",][is.na(CAPTURE_TRACE),]$CAPTURE_TRACE=unlist(str_extract_all(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][IS_CAPTURE_TRACE=="TRUE",][!duplicated(ID_OP),][grep("#", COMMENTAIRE.y),]$COMMENTAIRE.y, "(?<=(?: |)Type de trace de capture(?: |):|type(?: |):).*?(?=#)"))[-1]
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+ 
+
+
+
+#removal of mistakes:
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][ID_OP=="111024597",]$ESPECE="Delphinidae" # error on dolphin identification: declared unidentifiable
+
+
+OBSMER_BYC_2021=OBSMER_BYC_2021[ID_MAREE!="17862108",] # error on dolphin identification: Stenella coreualba not delphinus delphis
+
+
+
+OBSMER_BYC_2021=OBSMER_BYC_2021[ID_MAREE!="20527097",] # error on dolphin identification: Tursiops truncatus not delphinus delphis
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+##Exploratory analyses
+
+```{r first exploratory analyses}
+
+
+
+#1) Declarative flow
+
+
+
+
+table(DCO_BYC_2021$ENGIN_COD)
+
+summary(DCO_BYC_2021$MAILLAGE)
+
+
+
+summary(DCO_BYC_2021$QUANT_POIDS_VIF_CACC_DECLARES/DCO_BYC_2021$NB_INDIVIDUS)
+
+
+
+
+
+#2) OBSMER program
+
+
+
+#description of fishing sequence implying accidental bycatch:
+
+
+
+OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]
+
+
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$NUM_OP)
+
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$NUM_OP)/table(operation$NUM_OP)[names(table(operation$NUM_OP)) %in% names(table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$NUM_OP))] #more observations of bycatch in the first OP ?
+
+
+
+
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$ETAT_MER)
+
+
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$ETAT_MER)/table(operation$ETAT_MER)[names(table(operation$ETAT_MER)) %in% names(table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$ETAT_MER))]
+
+
+table(operation$ETAT_MER, (operation$ID_OP %in% OBSMER_BYC_2021$ID_OP) )
+fisher.test(table(operation$ETAT_MER, (operation$ID_OP %in% OBSMER_BYC_2021$ID_OP) ), simulate.p.value = T)
+#less observation of bycatch when rough sea ?
+
+
+table(str_sub(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$DATE_FIN.y,4,5))
+
+table(str_sub(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$DATE_FIN.y,4,5))/table(str_sub(operation$DATE_FIN,4,5))
+
+table(str_sub(operation$DATE_FIN,4,5), (operation$ID_OP %in% OBSMER_BYC_2021$ID_OP) )
+fisher.test(table(str_sub(operation$DATE_FIN,4,5), (operation$ID_OP %in% OBSMER_BYC_2021$ID_OP) ), simulate.p.value = T)
+fisher.multcomp(table(str_sub(operation$DATE_FIN,4,5), (operation$ID_OP %in% OBSMER_BYC_2021$ID_OP) ))
+#More observations of bycatch at the beginning of the year
+
+
+
+
+summary(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$DUREE_OP)
+
+t.test(operation$DUREE_OP ~ I(operation$ID_OP %in% OBSMER_BYC_2021$ID_OP))  #More observations of bycatch in long fishing sequence
+
+
+
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$RECTANGLE) # observation mainly near to the shore
+
+
+
+summary(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$PROF_FOND)
+summary(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$PROF_ENGIN)
+
+t.test(operation$PROF_FOND ~ I(operation$ID_OP %in% OBSMER_BYC_2021$ID_OP))
+t.test(operation$PROF_ENGIN ~ I(operation$ID_OP %in% OBSMER_BYC_2021$ID_OP))
+#More observation of bycatch when the engine is at lower depth
+
+
+
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$ENGIN)
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$ESPECE_CIBLE)#bycatch mainly observed in trawler and gillnet, when targeting hake, sole or seabass
+
+
+
+
+
+summary(as.numeric(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$MAILL))
+summary(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$EFFORT)
+
+t.test(as.numeric(operation$MAILL) ~ I(operation$ID_OP %in% OBSMER_BYC_2021$ID_OP))
+t.test(operation$EFFORT ~ I(operation$ID_OP %in% OBSMER_BYC_2021$ID_OP))
+#more bycatch observations when mesh size and engine size are relatively long
+
+
+
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$DISPO_SELECT1)
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$DISPO_REPULS1) #efficiency pingers and repulsive devices ? (warning: probable bias -> the volunteers to observation programs may be also more ecline to volunteer to other programs as the use of repulsive or selective devices, producing artificial associations between the two = maybe the non-volunteer capture even more dolphins without devices and without being monitored)
+
+
+
+summary(as.numeric(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$GEAR_SPEED))
+ t.test(as.numeric(operation$GEAR_SPEED) ~ I(operation$ID_OP %in% OBSMER_BYC_2021$ID_OP))
+ #More observations of bycatches when high gear speed
+ 
+ 
+ 
+ summary(as.numeric(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$POIDS_REF_CAPT))
+t.test(as.numeric(operation$POIDS_REF_CAPT) ~ I(operation$ID_OP %in% OBSMER_BYC_2021$ID_OP)) #parcellar data, more precise to use estimate directly by aggregating all capture
+
+
+
+
+
+
+
+
+#description of captures implying accidental bycatch:
+
+
+table(rep(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_CAPTURE),]$SEXE, times=OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_CAPTURE),]$NOMBRE.x)) # slightly more males in accidental bycatch observations ?
+
+
+table(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_OP),]$NOMBRE) #majority of isolated individuals in bycatch?
+
+
+summary(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][!duplicated(ID_IND),]$POIDS_MOY) # warning: outliers with null individual weights... 
+
+
+
+
+summary(as.numeric(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][CRITERE=="Longueur totale (LT)",]$VALEUR))
+summary(as.numeric(OBSMER_BYC_2021[ESPECE=="Delphinus delphis",][CRITERE=="Circonférence (C)",]$VALEUR))
+
+
+#weight and length relatively low compared of average values for the species ? Juveniles more impacted ?
+
+
+
+table(OBSMER_BYC_2021$IS_CAPTURE_TRACE) #surprisingly many observation with no capture marks
+unique(OBSMER_BYC_2021$CAPTURE_TRACE)
+
+
+
+
+
+
+
+#more precise description of engines implied:
+
+
+
+OBSMER_BYC_2021<-read.csv2("CAPTURES.csv", fileEncoding="ISO-8859-3")
+
+
+setDT(OBSMER_BYC_2021)
+
+
+
+OBSMER_BYC_2021=OBSMER_BYC_2021[ESPECE=="Delphinus delphis",]
+
+
+
+
+
+strat<-read.csv2("STRATEGIE.csv", fileEncoding="ISO-8859-3")
+
+setDT(strat)
+
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, strat[,.(ID_VRAC,ID_OP)], by="ID_VRAC", all.x = T, all.y=F)
+
+
+
+
+operation<-read.csv2("OPERATION_PECHE.csv", fileEncoding="ISO-8859-3")
+
+setDT(operation)
+
+
+
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, operation[,.(ID_MAREE,ID_OP,ZONE)], by="ID_OP", all.x = T, all.y=F)
+
+
+OBSMER_BYC_2021=OBSMER_BYC_2021[ZONE %in% c("27.8.a","27.8.b"),]
+
+
+
+marees<-read.csv2("MAREE.csv", fileEncoding="ISO-8859-3")
+
+setDT(marees)
+
+
+
+OBSMER_BYC_2021=marees[ID_MAREE %in% OBSMER_BYC_2021[,ID_MAREE],]
+
+
+
+
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, operation[ID_MAREE %in% OBSMER_BYC_2021$ID_MAREE,], by="ID_MAREE", all = T)
+
+
+
+engin<-read.csv2("ENGINS.csv", fileEncoding="ISO-8859-3")
+
+setDT(engin)
+
+OBSMER_BYC_2021=merge(OBSMER_BYC_2021, engin[ID_OP %in% OBSMER_BYC_2021$ID_OP,], by="ID_OP", all = T)
+
+
+
+
+
+
+
+summary(as.numeric(OBSMER_BYC_2021[NAME=="Hauteur du filet", NUMERICAL_VALUE]))
+t.test(as.numeric(engin[NAME=="Hauteur du filet", NUMERICAL_VALUE]) ~ I(engin[NAME=="Hauteur du filet",]$ID_OP %in% OBSMER_BYC_2021$ID_OP))
+
+
+
+
+
+table(OBSMER_BYC_2021[NAME=="Matériau de fabrication ", QUALITATIVE_VALUE_NAME])
+
+table(engin[NAME=="Matériau de fabrication ", QUALITATIVE_VALUE_NAME], (engin[NAME=="Matériau de fabrication ",]$ID_OP %in% OBSMER_BYC_2021$ID_OP) )
+fisher.test(table(engin[NAME=="Matériau de fabrication ", QUALITATIVE_VALUE_NAME], (engin[NAME=="Matériau de fabrication ",]$ID_OP %in% OBSMER_BYC_2021$ID_OP) ), simulate.p.value = T)
+fisher.multcomp(table(engin[NAME=="Matériau de fabrication ", QUALITATIVE_VALUE_NAME], (engin[NAME=="Matériau de fabrication ",]$ID_OP %in% OBSMER_BYC_2021$ID_OP) ))
+
+
+
+
+summary(as.numeric(OBSMER_BYC_2021[NAME=="Longueur de la corde de dos (cumulée si jumeaux)", NUMERICAL_VALUE]))
+t.test(as.numeric(engin[NAME=="Longueur de la corde de dos (cumulée si jumeaux)", NUMERICAL_VALUE]) ~ I(engin[NAME=="Longueur de la corde de dos (cumulée si jumeaux)",]$ID_OP %in% OBSMER_BYC_2021$ID_OP))
+
+
+
+
+summary(as.numeric(OBSMER_BYC_2021[NAME=="Longueur de la corde de dos (cumulée si jumeaux)", NUMERICAL_VALUE]))
+t.test(as.numeric(engin[NAME=="Longueur de la corde de dos (cumulée si jumeaux)", NUMERICAL_VALUE]) ~ I(engin[NAME=="Longueur de la corde de dos (cumulée si jumeaux)",]$ID_OP %in% OBSMER_BYC_2021$ID_OP))
+
+
+#can allow to specify the gear in particular for the trawls (number, number of face and panels, opening)
+
+
+
+
+#APPLIQUER AUX ECHELLES CAPTURES ET INDIVIDUELLES PUIS EFFET CARACTERISTIQUES MAREES/SEQUENCE (POIDS, EFFORT, DIVERSITE, PRINCIPALE ESPECES PECHES) ! AJOUT DESCRIPTION PRECISE ENGIN ?
+ 
+
+```
+
+
+
+
+
+
+
+## Random forest analyses on declaration flow
+
+
+
+
+
+```{r random forest declaration flow}
+
+
+##########Yearly scale:
+
+
+
+#two classes to be predicted: no bycatch/bycatch observed during a year (could be also done on marees scale)
+
+
+#performed on all vessels considered as "trustable", i.e with at least one declaration of accidental capture ==> could then be applied on the entire vessel population
+
+
+#set of vessels used for analysis:
+
+
+trustedVessels=DECL_BYC$NAVS_COD
+
+
+
+#set of vessels associated with an accidental bycatch:
+
+paste(DCO_DECL_BYC$NAVS_COD, DCO_DECL_BYC$AN, sep="_")
+
+
+
+
+
+data_vessel_2019_2022 <- readRDS("~/Data/SACROIS/data_vessel_2019_2022_with_cluster_51_31_no_port.rds")
+
+
+
+
+data_vessel_2019_2022T=data_vessel_2019_2022[data_vessel_2019_2022$NAVS_COD %in% trustedVessels,]
+
+
+
+data_vessel_2019_2022T$Bycatch="No"
+
+data_vessel_2019_2022T[data_vessel_2019_2022T$NAVS_COD_YEAR %in% paste(DCO_DECL_BYC$NAVS_COD, DCO_DECL_BYC$AN, sep="_"),]$Bycatch="Yes"
+
+
+
+data_vessel_2019_2022T$Bycatch=as.factor(data_vessel_2019_2022T$Bycatch)
+
+
+
+data_vessel_2019_2022T=data_vessel_2019_2022T[, !(colnames(data_vessel_2019_2022T) %in% c("NAVS_COD_YEAR","NAVS_COD","YEAR","FLOTTILLE_IFREMER_LIB", "S_FLOTTILLE_IFREMER_LIB",            "S_S_FLOTTILLE_IFREMER_LIB",          "DCR_GRANDE_FLOTTILLE_LIB",           "DCR_SEGMENT_CE_LIB",                 "DCR_FLOTTILLE_LIB",                 
+  "DCR_S_FLOTTILLE_LIB",                "DCR_S_S_FLOTTILLE_LIB",              "ART_RESTIT_LIB",                     "FLOTTILLE_RESTIT_LIB",               "S_FLOTTILLE_RESTIT_LIB",            "S_S_FLOTTILLE_RESTIT_LIB",           "BZH_FLOTTILLE_LIB",                  "BZH_S_FLOTTILLE_LIB"))]
+
+
+
+colnames(data_vessel_2019_2022T)=str_replace(colnames(data_vessel_2019_2022T), " ", "_")
+
+
+
+data_vessel_2019_2022_whole=data_vessel_2019_2022T[, !(colnames(data_vessel_2019_2022T) %in% c("clust","clust2","name_clust2","Sous_Flottille_cluster_number", "Sous_Flottille_cluster_number2",            "Sous_Sous_Flottille_cluster_number",          "Sous_Sous_Flottille_cluster_number2"))]
+
+
+
+
+
+
+
+
+#different possibility for the treatment of NA values:
+#-remove variable with two many NA (<0.5%: retained all vessels for 4676 variables / <1%: retained 85% of vessels for 5528 variables)
+#-estimate missing value (through rfImpute function ?)
+
+
+
+#conservative methods:
+
+
+
+bycatch.rf <- randomForest(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.005 )]),
+                        importance = TRUE,
+                        do.trace = 100)
+
+plot(bycatch.rf)
+
+
+
+
+
+
+
+#less conservative methods:
+
+
+
+
+bycatch.rf <- randomForest(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]),
+                        importance = TRUE,
+                        do.trace = 100)
+plot(bycatch.rf)
+
+
+
+
+
+
+
+#roc curve:
+
+library(ROCR)
+
+OOB.votes <- predict (bycatch.rf,na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.008 )])[,!(colnames(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.008 )]) %in% "Bycatch")],type="prob");
+OOB.pred <- OOB.votes[,2];
+
+pred.obj <- prediction (OOB.pred,na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.008 )])$Bycatch);
+
+RP.perf <- performance(pred.obj, "rec","prec");
+plot (RP.perf);
+
+ROC.perf <- performance(pred.obj, "fpr","tpr");
+plot (ROC.perf);
+
+plot  (RP.perf@alpha.values[[1]],RP.perf@x.values[[1]]);
+lines (RP.perf@alpha.values[[1]],RP.perf@y.values[[1]]);
+lines (ROC.perf@alpha.values[[1]],ROC.perf@x.values[[1]]);
+
+
+
+
+
+
+
+#constraining sampling between classes allow to better balance type 1 and type 2 error (but still very large...):
+
+bycatch.rf_sampsize <- randomForest(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]),
+                           importance = TRUE,  ntree=1000,
+                           do.trace = 100, sampsize=c(20,22)) #constrain to sample sufficient occurrences in the unbalanced class
+plot(bycatch.rf_sampsize)
+
+#same with cutoff:
+
+bycatch.rf_cutoff <- randomForest(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]),
+                           importance = TRUE,
+                           do.trace = 100, cutoff=c(0.72,0.28))
+
+plot(bycatch.rf_cutoff)
+
+
+
+
+
+
+#same than before but with keeping the same sample size of positive case while minimizing false negative:
+
+
+bycatch.rf_same_sampsize <- randomForest(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]),
+                           importance = TRUE,  ntree=1000,
+                           do.trace = 100, sampsize=c(20,17)) #constrain to sample sufficient occurences in the unbalanced class
+plot(bycatch.rf_same_sampsize)
+
+
+bycatch.rf_same_cutoff <- randomForest(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]),
+                           importance = TRUE,
+                           do.trace = 100, cutoff=c(0.65,0.35))
+
+plot(bycatch.rf_same_cutoff)
+
+
+
+
+
+
+
+
+
+
+#regularized random forest (improve a little bit the model quality):
+
+
+
+
+bycatch.rf_reg <- RRF(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]),
+                  importance = TRUE,
+                  do.trace = 100, coefReg=0.9)
+
+plot(bycatch.rf_reg); bycatch.rf_reg
+
+
+
+
+bycatch.rf_reg_sampsize <- RRF(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]),
+                  importance = TRUE,
+                  do.trace = 100, coefReg=0.9, sampsize=c(25,30), ntree=1000)
+
+plot(bycatch.rf_reg_sampsize); bycatch.rf_reg_sampsize
+
+
+
+
+bycatch.rf_reg_same_sampsize <- RRF(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]),
+                  importance = TRUE,
+                  do.trace = 100, coefReg=0.9, sampsize=c(35,30))
+
+plot(bycatch.rf_reg_same_sampsize)
+bycatch.rf_reg_same_sampsize$importance[bycatch.rf_reg_same_sampsize$importance[,1]!=0,][order(bycatch.rf_reg_same_sampsize$importance[bycatch.rf_reg_same_sampsize$importance[,1]!=0,][,4], decreasing = T),]
+varImpPlot(bycatch.rf_reg_same_sampsize)
+randomForest::partialPlot(bycatch.rf_reg_same_sampsize, na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]), eco_LIN, "Yes")
+
+
+predictions<- predict(bycatch.rf_reg_same_sampsize, na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]), type = "response")
+
+
+
+
+
+
+
+#predictions on the whole population (except "trusted" vessels):
+
+
+data_vessel_2019_2022= data_vessel_2019_2022[!(data_vessel_2019_2022$NAVS_COD %in% trustedVessels),]
+
+
+data_vessel_2019_2022=data_vessel_2019_2022[, !(colnames(data_vessel_2019_2022) %in% c("NAVS_COD_YEAR","NAVS_COD","YEAR","FLOTTILLE_IFREMER_LIB", "S_FLOTTILLE_IFREMER_LIB",            "S_S_FLOTTILLE_IFREMER_LIB",          "DCR_GRANDE_FLOTTILLE_LIB",           "DCR_SEGMENT_CE_LIB",                 "DCR_FLOTTILLE_LIB",                 
+  "DCR_S_FLOTTILLE_LIB",                "DCR_S_S_FLOTTILLE_LIB",              "ART_RESTIT_LIB",                     "FLOTTILLE_RESTIT_LIB",               "S_FLOTTILLE_RESTIT_LIB",            "S_S_FLOTTILLE_RESTIT_LIB",           "BZH_FLOTTILLE_LIB",                  "BZH_S_FLOTTILLE_LIB"))]
+
+
+
+colnames(data_vessel_2019_2022)=str_replace(colnames(data_vessel_2019_2022), " ", "_")
+
+
+
+data_vessel_2019_2022=data_vessel_2019_2022[, !(colnames(data_vessel_2019_2022) %in% c("clust","clust2","name_clust2","Sous_Flottille_cluster_number", "Sous_Flottille_cluster_number2",            "Sous_Sous_Flottille_cluster_number",          "Sous_Sous_Flottille_cluster_number2"))]
+
+
+
+
+predictions<- predict(bycatch.rf_same_sampsize, data_vessel_2019_2022[, colnames(data_vessel_2019_2022) %in% colnames(na.omit(data_vessel_2019_2022_whole[,sapply(data_vessel_2019_2022_whole, function(x) sum(is.na(x))/length(x)<0.01 )]))], type = "response")
+
+
+
+
+data_vessel_2019_2022 <- readRDS("~/Data/SACROIS/data_vessel_2019_2022_with_cluster_51_31_no_port.rds")
+
+data_vessel_2019_2022=data_vessel_2019_2022[!(data_vessel_2019_2022$NAVS_COD %in% trustedVessels),]
+
+data_vessel_2019_2022$bycatch_pred=predictions
+
+
+table(data_vessel_2019_2022$bycatch_pred)
+table(data_vessel_2019_2022[data_vessel_2019_2022$bycatch_pred=="Yes",]$name_clust2)
+summary(data_vessel_2019_2022[data_vessel_2019_2022$bycatch_pred=="Yes",]$NAVP_LONGUEUR_HT)
+table(data_vessel_2019_2022[data_vessel_2019_2022$bycatch_pred=="Yes",]$main_engine_nb_year)
+table(data_vessel_2019_2022[data_vessel_2019_2022$bycatch_pred=="Yes",]$main_stat_rect_nb_year)
+table(data_vessel_2019_2022[data_vessel_2019_2022$bycatch_pred=="Yes",]$main_month_nb_year)
+table(data_vessel_2019_2022[data_vessel_2019_2022$bycatch_pred=="Yes",]$main_sp_nb_year)
+
+
+#predictions made by random forest with cutoffs seemed to permissive (very high number of bycatch case: very probably many false positive)
+#predictions made by random forest with regularization seemed to produced marked false positive (false positive particularly absurd: bycatch with trap, when dragging...)
+
+#a good compromise seems to be the prediction keeping the sample size of bycatch cases while minimizing false negative
+
+
+
+
+#Poster plots:
+
+ggplot(data_vessel_2019_2022[data_vessel_2019_2022$bycatch_pred=="Yes" & !is.na(data_vessel_2019_2022$bycatch_pred) & data_vessel_2019_2022$name_clust2!="",], aes(forcats::fct_infreq(str_wrap(name_clust2,50)))) + geom_bar() + theme_gray(base_size = 22) + theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1), legend.position = "left") + labs(x= "Strategies with at least one predicted accidental bycatch event (Common dolphin)\nPrediction performed on all vessels out of the reference fleet", y = "Predicted bycatch events count")
+
+p1 <- ggplot(data_vessel_2019_2022[!is.na(data_vessel_2019_2022$bycatch_pred),], aes(x=bycatch_pred, y=NAVP_LONGUEUR_HT)) + geom_boxplot() + theme_gray(base_size = 22)  + labs(x= "", y = "Vessel's length (cm)")
+p2 <- ggplot(data_vessel_2019_2022[!is.na(data_vessel_2019_2022$bycatch_pred),], aes(x=bycatch_pred, y=weight_year)) + geom_boxplot() + theme_gray(base_size = 22)  + labs(x= "", y = "Yearly fishing weight (kg)") + scale_y_continuous(limits = c(0, 50000))
+p3 <- ggplot(data_vessel_2019_2022[!is.na(data_vessel_2019_2022$bycatch_pred),], aes(x=bycatch_pred, y=sea_days_year)) + geom_boxplot() + theme_gray(base_size = 22)  + labs(x= "", y = "Yearly fishing effort (days at sea)") 
+
+library(grid); library(gridExtra)
+grid.arrange(p1, p2, p3, nrow = 1, bottom=textGrob("Prediction of bycatch event\nPrediction performed on all vessels out of the reference fleet", gp=gpar(fontsize=22)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#random forest only on the most implied fleets:
+
+
+data_vessel_2019_2022_Clust37=data_vessel_2019_2022[data_vessel_2019_2022$Cluster_number==37,]
+
+
+bycatch.rf <- randomForest(Bycatch ~ ., data = na.omit(data_vessel_2019_2022_Clust37[,sapply(data_vessel_2019_2022_Clust37, function(x) sum(is.na(x))/length(x)<0.008 )]),
+                        importance = TRUE,
+                        do.trace = 100)
+
+
+
+
+
+
+```
+
+
+

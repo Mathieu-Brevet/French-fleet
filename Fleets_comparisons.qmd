@@ -1,0 +1,1996 @@
+---
+title: "Fleet comparisons"
+author: "Mathieu Brevet"
+execute:
+  echo: false
+  warning=: false
+format: 
+  pdf:
+    fig-width: 20
+    fig-height: 20
+editor: source
+---
+
+
+
+```{r loading used packages and functions}
+#| echo: false
+#| warning: false
+
+
+# Coded on R version 4.3.1 ("Beagle Scouts"), Rstudio version "Mountain Hydrangea" (2023.06.0)
+
+library(stringr) # string processing package
+
+library(dplyr)
+library(data.table) #more efficient management of large data sets
+
+
+library(FactoMineR) 
+library(factoextra) # used for multivariate analyses, hierarchical classification
+
+
+library(ggplot2)
+library(hrbrthemes) # dependency of ggplot2, for better visualization of heatmaps
+
+library(igraph)
+library(GGally)
+library(ggnetwork)
+#visualization of nets
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##Classification comparisons
+
+
+
+
+```{r comparaison classification}
+#| warning: false
+#| results: hide
+
+
+
+
+setwd("~/Data/SACROIS")
+
+
+res.hcpc_most=readRDS("res.hcpc_most_temp.rds")
+
+
+res.hcpc_most$data.clust$NAVS_COD_YEAR=rownames(res.hcpc_most$data.clust)
+
+
+classif1=read.csv("Classif_2019_2022_test.csv", header=F, encoding = "latin1")
+
+compare=merge(res.hcpc_most$data.clust, classif1[!duplicated(classif1$V1), c("V1", "V2")], by.x="clust", by.y="V1")
+
+
+compare=compare[,colnames(compare) %in% c("clust","V2", "NAVS_COD_YEAR")]
+
+
+compare$NAVS_COD=str_sub(compare$NAVS_COD_YEAR,1, 6)
+
+
+
+
+setwd("~/Typo_fileyeur_Demaneche/Typologie_Fileyeur_GG_2018_2022")
+
+
+typo2018=read.csv2("TYPOF_2018.csv", encoding="latin1")
+typo2019=read.csv2("TYPOF_2019.csv", encoding="latin1")
+
+typo2019=typo2019[, colnames(typo2019) %in% colnames(typo2018)]
+
+
+typo2020=read.csv2("TYPOF_2020_2021.csv", encoding="latin1")
+typo2020=typo2020[, colnames(typo2020) %in% colnames(typo2018)]
+
+typo2022=read.csv2("TYPOF_2022.csv", encoding="latin1")
+typo2022=typo2022[, colnames(typo2022) %in% colnames(typo2018)]
+
+typo=rbind(typo2018, typo2019, typo2020, typo2022)
+
+typo$NAVS_COD_YEAR=paste(typo$NAVS_COD, typo$YEARp, sep = "_")
+
+
+
+compare=merge(compare, typo, by="NAVS_COD_YEAR", all=T)
+
+
+compare[is.na(compare$NAVS_COD.x),]$NAVS_COD.x=compare[is.na(compare$NAVS_COD.x),]$NAVS_COD.y
+
+compare$NAVS_COD.y=NULL
+
+
+
+
+colnames(compare)[3]="Flotille_cluster"
+colnames(compare)[4]="NAVS_COD"
+
+
+
+
+
+
+
+setwd("~/DELMOGES")
+
+
+
+flt=read.csv("str_flt_2000_2020_update2023.csv", encoding = "latin1")
+
+flt$NAVS_COD_YEAR=paste(flt$vessel, flt$year, sep="_")
+
+
+compare=merge(compare, flt, all=T)
+
+compare$year=str_sub(compare$NAVS_COD_YEAR, 8, 11)
+
+compare$NAVS_COD=str_sub(compare$NAVS_COD_YEAR, 1,6)
+
+compare$YEARp=NULL
+compare$vessel=NULL
+
+
+compare=compare[order(compare$year),]
+
+compare=compare[,c(4,10,1,2,3,5,6,7,8,11,12)]
+
+
+
+
+
+flt_isis=read.csv("df_year_vessel_fleet.txt", encoding="latin1")
+
+
+flt_isis$NAVS_COD_YEAR=paste(flt_isis$VE_REF, flt_isis$REF_YEAR, sep="_")
+
+
+
+compare=merge(compare, flt_isis, all=T)
+
+compare$year=str_sub(compare$NAVS_COD_YEAR, 8, 11)
+
+compare$NAVS_COD=str_sub(compare$NAVS_COD_YEAR, 1,6)
+
+
+compare$X=NULL 
+compare$REF_YEAR=NULL
+compare$VE_REF=NULL
+
+
+compare=compare[order(compare$year),]
+
+
+
+
+
+
+colnames(compare)[4]="Cluster_number"
+colnames(compare)[6:9]=c("FLOTTILLE_COD_SIH_Fileyeurs", "FLOTTILLE_LIB_SIH_Fileyeurs", "S_FLOTTILLE_COD_SIH_Fileyeurs", "S_FLOTTILLE_LIB_SIH_Fileyeurs")
+colnames(compare)[10:11]=c("strategy_DEFIPEL_Chalutiers","fleet_DEFIPEL_Chalutiers")
+
+
+
+
+
+
+
+
+
+
+
+compare$Sous_Flottille_cluster_number=NA
+
+compare=compare[,c(1:5,14,6:13)]
+
+d=c("1", "6", "8", "9", "15", "17", "22", "24", "25", "26", "28", "30", "31", "34", "37", "38", "41", "42", "43")
+
+
+
+for (i in d) {
+  x=readRDS(file = paste0("res.hcpc_", i, ".rds"));
+  assign( paste0("res.hcpc_", i), x)
+}
+
+rm(x)
+gc()
+
+
+
+
+for (i in d) {
+  t=data.frame(eval(as.name(paste0("res.hcpc_",i)))$data.clust$clust, rownames(eval(as.name(paste0("res.hcpc_",i)))$data.clust));
+  colnames(t)=c(paste0("clust_",i), "NAVS_COD_YEAR");
+  t[, c(paste0("clust_",i))]=paste(i, t[[paste0("clust_",i)]], sep=".");
+  compare=merge(compare, t, all.x=T);
+  compare[!is.na(compare[[paste0("clust_",i)]]),]$Sous_Flottille_cluster_number=compare[!is.na(compare[[paste0("clust_",i)]]), c(paste0("clust_",i))];
+  compare[, c(paste0("clust_",i))]=NULL
+}
+
+
+
+
+classif2=classif1[,c("V3", "V4")]
+
+classif2=na.omit(classif2)
+
+
+
+
+compare=merge(compare, classif2, by.x="Sous_Flottille_cluster_number", by.y="V3", all.x=T)
+
+
+
+colnames(compare)[15]="Sous_Flottille_cluster"
+
+
+compare=compare[,c(2:6,1,15,7:14)]
+
+
+
+compare=compare[order(compare$NAVS_COD),]
+compare=compare[order(compare$year),]
+
+
+
+
+
+
+
+
+
+
+
+
+compare$Sous_Sous_Flottille_cluster_number=NA
+
+compare=compare[,c(1:7,16,8:15)]
+
+
+d=c("1.1", "1.2", "6.1", "9.1", "15.1", "17.1", "22.2", "24.1", "26.2", "30.1", "34.1", "37.1", "38.1", "38.2", "42.1", "42.2", "43.1")
+
+
+for (i in d) {
+  x=readRDS(file = paste0("res.hcpc_", i, ".rds"));
+  assign( paste0("res.hcpc_", i), x)
+}
+
+rm(x)
+gc()
+
+
+
+
+
+for (i in d) {
+  t=data.frame(eval(as.name(paste0("res.hcpc_",i)))$data.clust$clust, rownames(eval(as.name(paste0("res.hcpc_",i)))$data.clust));
+  colnames(t)=c(paste0("clust_",i), "NAVS_COD_YEAR");
+  t[, c(paste0("clust_",i))]=paste(i, t[[paste0("clust_",i)]], sep=".");
+  compare=merge(compare, t, all.x=T);
+  compare[!is.na(compare[[paste0("clust_",i)]]),]$Sous_Sous_Flottille_cluster_number=compare[!is.na(compare[[paste0("clust_",i)]]), c(paste0("clust_",i))];
+  compare[, c(paste0("clust_",i))]=NULL
+}
+
+
+
+
+classif3=classif1[,c("V5", "V6")]
+
+classif3=classif3[classif3$V5!="",]
+
+
+
+
+compare=merge(compare, classif3, by.x="Sous_Sous_Flottille_cluster_number", by.y="V5", all.x=T)
+
+
+
+colnames(compare)[17]="Sous_Sous_Flottille_cluster"
+
+
+compare=compare[,c(2:8,1,17,9:16)]
+
+
+
+compare=compare[order(compare$NAVS_COD),]
+compare=compare[order(compare$year),]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+rm("typo","typo2018","typo2019","typo2020","typo2022", "classif1","flt","flt_isis","t")
+gc(verbose=F)
+
+compare=compare[!duplicated(compare$NAVS_COD_YEAR),]
+
+write.csv(compare, "Comparaison_Flottilles_avec_ID.csv", fileEncoding="UTF-8")
+
+
+```
+
+
+
+
+
+####Graphs comparing classification methods
+
+
+#####Heatmaps
+
+
+
+```{r comparaison classification - graphs - heatmap}
+#| warning: false
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Flotille_cluster", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+ 
+ tab=apply(xtabs(n~Flotille_cluster+FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+ 
+ 
+ data=data.frame(FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Flotille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+ 
+ 
+ 
+ # Heatmap 
+ ggplot(data, aes(FLOTTILLE_LIB_SIH_Fileyeurs, Flotille_cluster, fill= n)) + 
+    scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+   geom_tile() + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size=15)) + ggtitle("SIH Fleet (x-axis) x Cluster Classifications\n(The redder, the more frequent the association is)") +     xlab("SIH Fleet") + ylab("Clusters Fleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+ 
+ 
+ 
+ 
+ 
+  
+ data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs), c("Flotille_cluster", "S_FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Flotille_cluster+S_FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(S_FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Flotille_cluster=colnames(tab)[col(tab)],n=c(tab))
+
+
+
+ # Heatmap
+graph <- ggplot(data, aes(S_FLOTTILLE_LIB_SIH_Fileyeurs, Flotille_cluster, fill= n)) +
+    scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+    geom_tile()
+graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size=15)) + ggtitle("SIH Subfleet (x-axis) x Cluster Classifications\n(The redder, the more frequent the association is)") +
+    xlab("SIH Subfleet") + ylab("Clusters Fleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17)) + theme(plot.title = element_text(size=17))
+
+
+
+
+
+
+
+
+
+
+
+
+
+ data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("Flotille_cluster", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Flotille_cluster+fleet_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(fleet_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Flotille_cluster=colnames(tab)[col(tab)], n=c(tab))
+
+
+
+ # Heatmap
+ graph <- ggplot(data, aes(fleet_DEFIPEL_Chalutiers, Flotille_cluster, fill= n)) +
+     scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+    geom_tile()
+ graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + ggtitle("DEFIPEL Fleet (x-axis) x Cluster Classifications\n(The redder, the more frequent the association is)") +
+     xlab("DEFIPEL Fleet") + ylab("Clusters Fleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+
+
+
+
+
+
+
+
+
+
+ data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("Flotille_cluster", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Flotille_cluster+strategy_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(strategy_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Flotille_cluster=colnames(tab)[col(tab)],
+                       n=c(tab))
+
+
+
+ # Heatmap
+ graph <- ggplot(data, aes(strategy_DEFIPEL_Chalutiers, Flotille_cluster, fill= n)) +
+     scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+     geom_tile()
+ graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + ggtitle("DEFIPEL Strategy (x-axis) x Cluster Classifications\n(The redder, the more frequent the association is)") +
+     xlab("DEFIPEL Strategy") + ylab("Clusters Fleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ # heatmap(xtabs(n~Flotille_cluster+FLOTTILLE_LIB_SIH_Fileyeurs, data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Flotille_cluster", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA, cexCol=1.5, cexRow = 1, margin=c(15,49))
+ # 
+ # 
+ # heatmap(xtabs(n~Flotille_cluster+S_FLOTTILLE_LIB_SIH_Fileyeurs, data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs), c("Flotille_cluster", "S_FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1, cexRow = 1, margin=c(25,49))
+ # 
+ # 
+ # 
+ # 
+ # 
+ # heatmap(xtabs(n~Flotille_cluster+fleet_DEFIPEL_Chalutiers, data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("Flotille_cluster", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1, cexRow = 1, margin=c(35,49))
+ # 
+ # heatmap(xtabs(n~Flotille_cluster+strategy_DEFIPEL_Chalutiers, data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("Flotille_cluster", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1, cexRow = 1, margin=c(20,49))
+ 
+ 
+
+
+
+
+
+
+
+
+
+
+
+# 
+# 
+# heatmap(xtabs(n~FLOTTILLE_LIB_SIH_Fileyeurs+fleet_DEFIPEL_Chalutiers, data=compare[!is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("FLOTTILLE_LIB_SIH_Fileyeurs", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(25,12))
+# 
+# 
+# heatmap(xtabs(n~FLOTTILLE_LIB_SIH_Fileyeurs+strategy_DEFIPEL_Chalutiers, data=compare[!is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("FLOTTILLE_LIB_SIH_Fileyeurs", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(15,12))
+# 
+# 
+# 
+# 
+# 
+# 
+# heatmap(xtabs(n~S_FLOTTILLE_LIB_SIH_Fileyeurs+fleet_DEFIPEL_Chalutiers, data=compare[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("S_FLOTTILLE_LIB_SIH_Fileyeurs", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(25,20))
+# 
+# 
+# heatmap(xtabs(n~S_FLOTTILLE_LIB_SIH_Fileyeurs+strategy_DEFIPEL_Chalutiers, data=compare[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("S_FLOTTILLE_LIB_SIH_Fileyeurs", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(17,20))
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# heatmap(xtabs(n~FLOTTILLE_LIB_SIH_Fileyeurs+fleet_isis, data=compare[!is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$fleet_isis), c("FLOTTILLE_LIB_SIH_Fileyeurs", "fleet_isis")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5,  margin=c(25,12))
+# 
+# 
+# heatmap(xtabs(n~FLOTTILLE_LIB_SIH_Fileyeurs+strategy_isis, data=compare[!is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$strategy_isis), c("FLOTTILLE_LIB_SIH_Fileyeurs", "strategy_isis")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(20,12))
+# 
+# 
+# 
+# 
+# 
+# 
+# heatmap(xtabs(n~S_FLOTTILLE_LIB_SIH_Fileyeurs+fleet_isis, data=compare[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$fleet_isis), c("S_FLOTTILLE_LIB_SIH_Fileyeurs", "fleet_isis")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(20,25))
+# 
+# 
+# heatmap(xtabs(n~S_FLOTTILLE_LIB_SIH_Fileyeurs+strategy_isis, data=compare[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$strategy_isis), c("S_FLOTTILLE_LIB_SIH_Fileyeurs", "strategy_isis")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(20,25))
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# heatmap(xtabs(n~fleet_isis+fleet_DEFIPEL_Chalutiers, data=compare[!is.na(compare$fleet_isis) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("fleet_isis", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(25,25))
+# 
+# 
+# heatmap(xtabs(n~strategy_isis+strategy_DEFIPEL_Chalutiers, data=compare[!is.na(compare$strategy_isis) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("strategy_isis", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count, drop.unused.levels = TRUE), Rowv = NA, Colv = NA,  cexCol=1.5, cexRow = 1.5, margin=c(20,25))
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ #######Subfleet:
+ 
+ 
+ 
+
+
+
+data=compare[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Sous_Flottille_cluster", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+ 
+ tab=apply(xtabs(n~Sous_Flottille_cluster+FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+ 
+ 
+ data=data.frame(FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+ 
+ 
+ 
+ # Heatmap 
+ ggplot(data, aes(FLOTTILLE_LIB_SIH_Fileyeurs, Sous_Flottille_cluster, fill= n)) + 
+    scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+   geom_tile() + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size=15)) + ggtitle("SIH Fleet (x-axis) x Cluster Subclassifications\n(The redder, the more frequent the association is)") +     xlab("SIH Fleet") + ylab("Clusters Subfleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+ 
+ 
+ 
+ 
+ 
+  
+ data=compare[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs), c("Sous_Flottille_cluster", "S_FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Sous_Flottille_cluster+S_FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(S_FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Sous_Flottille_cluster=colnames(tab)[col(tab)],n=c(tab))
+
+
+
+ # Heatmap
+graph <- ggplot(data, aes(S_FLOTTILLE_LIB_SIH_Fileyeurs, Sous_Flottille_cluster, fill= n)) +
+    scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+    geom_tile()
+graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size=15)) + ggtitle("SIH Subfleet (x-axis) x Cluster Subclassifications\n(The redder, the more frequent the association is)") +
+    xlab("SIH Subfleet") + ylab("Clusters Subfleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+
+
+
+
+
+
+
+
+
+
+
+
+ data=compare[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("Sous_Flottille_cluster", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Sous_Flottille_cluster+fleet_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(fleet_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Sous_Flottille_cluster=colnames(tab)[col(tab)], n=c(tab))
+
+
+
+ # Heatmap
+ graph <- ggplot(data, aes(fleet_DEFIPEL_Chalutiers, Sous_Flottille_cluster, fill= n)) +
+     scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+    geom_tile()
+ graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + ggtitle("DEFIPEL Fleet (x-axis) x Cluster Subclassifications\n(The redder, the more frequent the association is)") +
+     xlab("DEFIPEL Fleet") + ylab("Clusters Subfleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+
+
+
+
+
+
+
+
+
+
+ data=compare[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("Sous_Flottille_cluster", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Sous_Flottille_cluster+strategy_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(strategy_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                       n=c(tab))
+
+
+
+ # Heatmap
+ graph <- ggplot(data, aes(strategy_DEFIPEL_Chalutiers, Sous_Flottille_cluster, fill= n)) +
+     scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+     geom_tile()
+ graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + ggtitle("DEFIPEL Strategy (x-axis) x Cluster Subclassifications\n(The redder, the more frequent the association is)") +
+     xlab("DEFIPEL Strategy") + ylab("Clusters Subfleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ #######Subsubfleet:
+ 
+ 
+ 
+
+
+
+data=compare[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Sous_Sous_Flottille_cluster", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+ 
+ tab=apply(xtabs(n~Sous_Sous_Flottille_cluster+FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+ 
+ 
+ data=data.frame(FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Sous_Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+ 
+ 
+ 
+ # Heatmap 
+ ggplot(data, aes(FLOTTILLE_LIB_SIH_Fileyeurs, Sous_Sous_Flottille_cluster, fill= n)) + 
+    scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+   geom_tile() + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size=15)) + ggtitle("SIH Fleet (x-axis) x Cluster Subsubclassifications\n(The redder, the more frequent the association is)") +     xlab("SIH Fleet") + ylab("Clusters Subsubfleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+ 
+ 
+ 
+ 
+ 
+  
+ data=compare[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs), c("Sous_Sous_Flottille_cluster", "S_FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Sous_Sous_Flottille_cluster+S_FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(S_FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Sous_Sous_Flottille_cluster=colnames(tab)[col(tab)],n=c(tab))
+
+
+
+ # Heatmap
+graph <- ggplot(data, aes(S_FLOTTILLE_LIB_SIH_Fileyeurs, Sous_Sous_Flottille_cluster, fill= n)) +
+    scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+    geom_tile()
+graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, size=15)) + ggtitle("SIH Subfleet (x-axis) x Cluster Subsubclassifications\n(The redder, the more frequent the association is)") +
+    xlab("SIH Subfleet") + ylab("Clusters Subsubfleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+
+
+
+
+
+
+
+
+
+
+
+
+ data=compare[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("Sous_Sous_Flottille_cluster", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Sous_Sous_Flottille_cluster+fleet_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(fleet_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Sous_Sous_Flottille_cluster=colnames(tab)[col(tab)], n=c(tab))
+
+
+
+ # Heatmap
+ graph <- ggplot(data, aes(fleet_DEFIPEL_Chalutiers, Sous_Sous_Flottille_cluster, fill= n)) +
+     scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+    geom_tile()
+ graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + ggtitle("DEFIPEL Fleet (x-axis) x Cluster Subsubclassifications\n(The redder, the more frequent the association is)") +
+     xlab("DEFIPEL Fleet") + ylab("Clusters Subsubfleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+
+
+
+
+
+
+
+
+
+
+ data=compare[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("Sous_Sous_Flottille_cluster", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+ tab=apply(xtabs(n~Sous_Sous_Flottille_cluster+strategy_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+ data=data.frame(strategy_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Sous_Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                       n=c(tab))
+
+
+
+ # Heatmap
+ graph <- ggplot(data, aes(strategy_DEFIPEL_Chalutiers, Sous_Sous_Flottille_cluster, fill= n)) +
+     scale_fill_distiller(palette= "YlOrRd", trans="reverse") +
+     geom_tile()
+ graph + theme_classic(base_size = 17) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + ggtitle("DEFIPEL Strategy (x-axis) x Cluster Subsubclassifications\n(The redder, the more frequent the association is)") +
+     xlab("DEFIPEL Strategy") + ylab("Clusters Subsubfleet") +  scale_y_discrete(labels = function(x)  stringr::str_wrap(x, width = 150)) + theme(plot.title = element_text(size=17))
+
+ 
+ 
+ 
+ 
+
+```
+
+
+
+##### Network graphs (comparing only the cluster method with other methods)
+
+
+
+```{r comparaison classification - graphs - net}
+#| warning: false
+#| fig-cap: 
+#| - Comparison clusters / SIH Fleet (all vessels)
+#| - Comparison clusters / SIH Fleet (Size)
+#| - Comparison clusters / SIH Fleet (Size, bipartite graph)
+#| - Comparison clusters / SIH Fleet (Frequencies, bipartite graph)
+#| - Comparison clusters / SIH Fleet (Frequencies)
+#| - Comparison clusters / SIH Subfleet (Frequencies, bipartite graph)
+#| - Comparison clusters / SIH Subfleet (Frequencies)
+#| - Comparison clusters / DEFIPEL Fleet (Frequencies, bipartite graph)
+#| - Comparison clusters / DEFIPEL Fleet (Frequencies)
+#| - Comparison clusters / DEFIPEL Strategy (Frequencies, bipartite graph)
+#| - Comparison clusters / DEFIPEL Strategy (Frequencies)
+
+
+#vizualisation of nets between classifications:
+
+# 
+# 
+# net <- graph_from_data_frame(d=compare[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Cluster_number", "FLOTTILLE_LIB_SIH_Fileyeurs")], vertices = cbind( names=unique(c(compare$Cluster_number[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)], compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c("Cluster_number","FLOTTILLE_LIB_SIH_Fileyeurs"), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+# 
+# 
+# 
+# 
+# # Attribuer des couleurs selon le type de classif
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# l <- layout_in_circle(net)
+# 
+# 
+# 
+# 
+# radian.rescale <- function(x, start=0, direction=1) {
+#   c.rotate <- function(x) (x + start) %% (2 * pi) * direction
+#   c.rotate(scales::rescale(x, to=c(0, 2 * pi), from=range(x)))
+# }
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# 
+# 
+# par(mar=c(6,6,6,6))
+# 
+# plot(net, layout=l, vertex.label.cex=1.5, vertex.size =12, vertex.label.dist=3,
+#      vertex.label.degree=lab.locs)
+# 
+# 
+# 
+# 
+# 
+# # not easily readable...
+# 
+# 
+# 
+# 
+# 
+# #alternative with weight=number of time the link is observed:
+# 
+# 
+# 
+# net <- graph_from_data_frame(d= compare[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Cluster_number", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count, vertices = cbind( names=unique(c(compare$Cluster_number[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)], compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c("Cluster_number","FLOTTILLE_LIB_SIH_Fileyeurs"), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+# 
+# net=delete.edges(net, which(E(net)$n==0))
+# 
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n/10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# radian.rescale <- function(x, start=0, direction=1) {
+#   c.rotate <- function(x) (x + start) %% (2 * pi) * direction
+#   c.rotate(scales::rescale(x, to=c(0, 2 * pi), from=range(x)))
+# }
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# 
+# plot(net, layout=l, vertex.label.cex=1.5, vertex.size =12, vertex.label.dist=3,
+#      vertex.label.degree=lab.locs)
+# 
+# 
+# 
+# 
+# 
+# #graph bipartite:
+# 
+# 
+# 
+# 
+# 
+# net <- graph_from_data_frame(d= compare[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Cluster_number", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count, vertices = cbind( names=unique(c(compare$Cluster_number[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)], compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c(TRUE,FALSE), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+# 
+# net=delete.edges(net, which(E(net)$n==0))
+# 
+# 
+# LO <- layout_as_bipartite(net)
+# E(net)$width <- E(net)$n/10
+# 
+# 
+# 
+# 
+# plot(net, vertex.label.cex=1.5, vertex.size=7, layout=LO[,2:1])
+# 
+
+
+
+
+
+
+#same graphs but scaled at cluster level (all comparisons with cluster classifications):
+
+
+
+
+data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Flotille_cluster", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Flotille_cluster+FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Flotille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+# net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)], compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c(TRUE,FALSE), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+# 
+# 
+# net=delete.edges(net, which(E(net)$n==0))
+# 
+# LO <- layout_as_bipartite(net)
+# E(net)$width <- E(net)$n*10
+# 
+# 
+# 
+# 
+# plot(net, vertex.label.cex=1.5, vertex.size=7, layout=LO[,2:1])
+
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)], compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c("Flotille_cluster","FLOTTILLE_LIB_SIH_Fileyeurs"), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+#ggnet2(net, mode = "circle", label = T)
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# radian.rescale <- function(x, start=0, direction=1) {
+#   c.rotate <- function(x) (x + start) %% (2 * pi) * direction
+#   c.rotate(scales::rescale(x, to=c(0, 2 * pi), from=range(x)))
+# }
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+# 
+
+
+
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Fleet", "SIH Fleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs), c("Flotille_cluster", "S_FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Flotille_cluster+S_FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(S_FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Flotille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+# net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)], compare$S_FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c(TRUE,FALSE), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+# 
+# net=delete.edges(net, which(E(net)$n==0))
+# 
+# 
+# LO <- layout_as_bipartite(net)
+# E(net)$width <- E(net)$n*10
+# 
+# 
+# 
+# 
+# plot(net, vertex.label.cex=1.5, vertex.size=7, layout=LO[,2:1])
+
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)], compare$S_FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c("Flotille_cluster","S_FLOTTILLE_LIB_SIH_Fileyeurs"), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Flotille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Fleet", "SIH Sufleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("Flotille_cluster", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Flotille_cluster+fleet_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(fleet_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Flotille_cluster=colnames(tab)[col(tab)],
+                n=c(tab))
+
+
+
+
+
+# net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)], compare$fleet_DEFIPEL_Chalutiers[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])), type=rep(c(TRUE,FALSE), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])),  length(unique(compare$fleet_DEFIPEL_Chalutiers[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])))  )), directed=FALSE)
+# 
+# net=delete.edges(net, which(E(net)$n==0))
+# 
+# 
+# LO <- layout_as_bipartite(net)
+# E(net)$width <- E(net)$n*10
+# 
+# 
+# 
+# 
+# plot(net,vertex.label.cex=1.5, vertex.size=7, layout=LO[,2:1])
+
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)], compare$fleet_DEFIPEL_Chalutiers[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])), type=rep(c("Flotille_cluster","fleet_DEFIPEL_Chalutiers"), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])),  length(unique(compare$fleet_DEFIPEL_Chalutiers[!is.na(compare$Flotille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+#     text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=0.75, col="black", srt=angle[i], xpd=T)
+# }
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Fleet", "DEFIPEL Fleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("Flotille_cluster", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Flotille_cluster+strategy_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(strategy_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Flotille_cluster=colnames(tab)[col(tab)],
+                n=c(tab))
+
+
+
+
+
+# net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)], compare$strategy_DEFIPEL_Chalutiers[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])), type=rep(c(TRUE,FALSE), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])),  length(unique(compare$strategy_DEFIPEL_Chalutiers[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])))  )), directed=FALSE)
+# 
+# net=delete.edges(net, which(E(net)$n==0))
+# 
+# 
+# LO <- layout_as_bipartite(net)
+# E(net)$width <- E(net)$n*10
+# 
+# 
+# 
+# 
+# plot(net,vertex.label.cex=1.5, vertex.size=7, layout=LO[,2:1])
+
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)], compare$strategy_DEFIPEL_Chalutiers[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])), type=rep(c("Flotille_cluster","strategy_DEFIPEL_Chalutiers"), times=c(  length(unique(compare$Flotille_cluster[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])),  length(unique(compare$strategy_DEFIPEL_Chalutiers[!is.na(compare$Flotille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+#     text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Fleet", "DEFIPEL Strategy"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+########### Subfleet:
+
+
+
+data=compare[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Sous_Flottille_cluster", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Sous_Flottille_cluster+FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Sous_Flottille_cluster[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)], compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c("FLOTTILLE_LIB_SIH_Fileyeurs","Sous_Flottille_cluster"), times=c(  length(unique(compare$Sous_Flottille_cluster[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+
+
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+# 
+# 
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Subfleet", "SIH Fleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs), c("Sous_Flottille_cluster", "S_FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Sous_Flottille_cluster+S_FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(S_FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Sous_Flottille_cluster[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)], compare$S_FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c("S_FLOTTILLE_LIB_SIH_Fileyeurs","Sous_Flottille_cluster"), times=c(  length(unique(compare$Sous_Flottille_cluster[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+# 
+
+
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Subfleet", "SIH Subleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("Sous_Flottille_cluster", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Sous_Flottille_cluster+fleet_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(fleet_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Sous_Flottille_cluster[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)], compare$fleet_DEFIPEL_Chalutiers[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])), type=rep(c("fleet_DEFIPEL_Chalutiers","Sous_Flottille_cluster"), times=c(  length(unique(compare$Sous_Flottille_cluster[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])),  length(unique(compare$fleet_DEFIPEL_Chalutiers[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+# 
+# 
+
+
+
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Subfleet", "DEFIPEL Fleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("Sous_Flottille_cluster", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Sous_Flottille_cluster+strategy_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(strategy_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Sous_Flottille_cluster[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)], compare$strategy_DEFIPEL_Chalutiers[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])), type=rep(c("Sous_Flottille_cluster","strategy_DEFIPEL_Chalutiers"), times=c(  length(unique(compare$Sous_Flottille_cluster[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])),  length(unique(compare$strategy_DEFIPEL_Chalutiers[!is.na(compare$Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+# 
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+# 
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Subfleet", "DEFIPEL Strategy"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+########### Subsubfleet:
+
+
+data=compare[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Sous_Sous_Flottille_cluster", "FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Sous_Sous_Flottille_cluster+FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Sous_Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Sous_Sous_Flottille_cluster[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)], compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c("FLOTTILLE_LIB_SIH_Fileyeurs","Sous_Sous_Flottille_cluster"), times=c(  length(unique(compare$Sous_Sous_Flottille_cluster[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Subsubfleet", "SIH Fleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs), c("Sous_Sous_Flottille_cluster", "S_FLOTTILLE_LIB_SIH_Fileyeurs")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Sous_Sous_Flottille_cluster+S_FLOTTILLE_LIB_SIH_Fileyeurs, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(S_FLOTTILLE_LIB_SIH_Fileyeurs=rownames(tab)[row(tab)], Sous_Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Sous_Sous_Flottille_cluster[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)], compare$S_FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])), type=rep(c("S_FLOTTILLE_LIB_SIH_Fileyeurs","Sous_Sous_Flottille_cluster"), times=c(  length(unique(compare$Sous_Sous_Flottille_cluster[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])),  length(unique(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Subsubfleet", "SIH Subfleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("Sous_Sous_Flottille_cluster", "fleet_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Sous_Sous_Flottille_cluster+fleet_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(fleet_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Sous_Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Sous_Sous_Flottille_cluster[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)], compare$fleet_DEFIPEL_Chalutiers[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])), type=rep(c("fleet_DEFIPEL_Chalutiers","Sous_Sous_Flottille_cluster"), times=c(  length(unique(compare$Sous_Sous_Flottille_cluster[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])),  length(unique(compare$fleet_DEFIPEL_Chalutiers[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$fleet_DEFIPEL_Chalutiers)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+
+
+l <- layout_in_circle(net)
+E(net)$width <- E(net)$n*10
+colrs <- c( "tomato", "gold")
+V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+
+
+
+
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Subsubfleet", "DEFIPEL Fleet"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data=compare[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("Sous_Sous_Flottille_cluster", "strategy_DEFIPEL_Chalutiers")] %>% group_by_all() %>% count
+
+tab=apply(xtabs(n~Sous_Sous_Flottille_cluster+strategy_DEFIPEL_Chalutiers, data, drop.unused.levels = TRUE), 1, function(x) x/sum(x))
+
+
+data=data.frame(strategy_DEFIPEL_Chalutiers=rownames(tab)[row(tab)], Sous_Sous_Flottille_cluster=colnames(tab)[col(tab)],
+                      n=c(tab))
+
+
+
+
+
+
+
+net <- graph_from_data_frame(d= data, vertices = cbind( names=unique(c(compare$Sous_Sous_Flottille_cluster[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)], compare$strategy_DEFIPEL_Chalutiers[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])), type=rep(c("Sous_Sous_Flottille_cluster","strategy_DEFIPEL_Chalutiers"), times=c(  length(unique(compare$Sous_Sous_Flottille_cluster[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])),  length(unique(compare$strategy_DEFIPEL_Chalutiers[!is.na(compare$Sous_Sous_Flottille_cluster) & !is.na(compare$strategy_DEFIPEL_Chalutiers)])))  )), directed=FALSE)
+
+net=delete.edges(net, which(E(net)$n<0.3))
+
+
+
+# 
+# l <- layout_in_circle(net)
+# E(net)$width <- E(net)$n*10
+# colrs <- c( "tomato", "gold")
+# V(net)$color <- rep(colrs, time=c(table(V(net)$type)))
+# 
+# 
+# 
+# 
+# 
+# lab.locs <- radian.rescale(x=1:34, direction=-1, start=0)
+# 
+# par(oma=c(3,3,3,3))
+# par(mar=c(15,15,15,15))
+# plot(net, layout=l, vertex.size=4, vertex.label="")
+# 
+# ## Apply labels manually
+# #Specify x and y coordinates of labels, adjust outward as desired
+# x = l[,1]*1.2
+# y = l[,2]*1.2
+# 
+# #create vector of angles for text based on number of nodes (flipping the orientation of the words half way around so none appear upside down)
+# angle = ifelse(atan(-(l[,1]/l[,2]))*(180/pi) < 0,  90 + atan(-(l[,1]/l[,2]))*(180/pi), 270 + atan(-l[,1]/l[,2])*(180/pi))
+# 
+# #Apply the text labels with a loop with angle as srt
+# for (i in 1:length(x)) {
+# 	text(x=x[i], y=y[i], labels=V(net)$name[i], adj=NULL, pos=NULL, cex=1, col="black", srt=angle[i], xpd=T)
+# }
+
+
+
+
+ggplot(ggnetwork(net, layout=layout_in_circle(net)), aes(x = x, y = y, xend = xend, yend = yend)) +
+    geom_edges(aes(linewidth = n), color = "grey70") + 
+    geom_nodes(aes(color = type), size=5) +   geom_nodelabel_repel(aes( label = str_wrap(name, width = 35)), size=4, box.padding = 1.5) +
+    theme_blank() + labs(linewidth="Proportion of association") + scale_color_discrete(name = "Classification type", labels = c("Cluster Subsubfleet", "DEFIPEL Strategy"))
+
+
+
+
+```
+
+
+#####Barplots
+
+
+```{r comparaison classification - graphs - barplot, eval=FALSE}
+#| warning: false
+
+
+#ggplot2 barplot:
+
+
+
+ggplot( compare[!is.na(compare$Cluster_number) & !is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs), c("Cluster_number", "FLOTTILLE_LIB_SIH_Fileyeurs")], aes(factor(Cluster_number), fill = factor(FLOTTILLE_LIB_SIH_Fileyeurs))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) +    xlab("Cluster number") + ylab("Frequency") + labs(fill = "Fleet name (SIH, Fileyeurs)")
+
+
+
+
+ggplot( compare[!is.na(compare$Cluster_number) & !is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs), c("Cluster_number", "S_FLOTTILLE_LIB_SIH_Fileyeurs")], aes(factor(Cluster_number), fill = factor(S_FLOTTILLE_LIB_SIH_Fileyeurs))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) +    xlab("Cluster number") + ylab("Frequency") + labs(fill = "Subfleet name (SIH, Fileyeurs)")
+
+
+
+
+
+ggplot( compare[!is.na(compare$Cluster_number) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("Cluster_number", "strategy_DEFIPEL_Chalutiers")], aes(factor(Cluster_number), fill = factor(strategy_DEFIPEL_Chalutiers))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) +    xlab("Cluster number") + ylab("Frequency") + labs(fill = "Strategy name (DEFIPEL, Chalutiers)")
+
+
+
+ggplot( compare[!is.na(compare$Cluster_number) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("Cluster_number", "fleet_DEFIPEL_Chalutiers")], aes(factor(Cluster_number), fill = factor(fleet_DEFIPEL_Chalutiers))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) +    xlab("Cluster number") + ylab("Frequency") + labs(fill = "Fleet name (DEFIPEL, Chalutiers)")
+
+
+
+
+
+
+#no comparisons possible with isis fleets as it is only available up to 2018
+
+
+
+
+
+
+
+
+
+
+#not many comparison possible when comparing SIH fleet on gillnet with trawler fleet or fleet >2019:
+
+
+
+
+ggplot( compare[!is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("FLOTTILLE_LIB_SIH_Fileyeurs", "fleet_DEFIPEL_Chalutiers")], aes(factor(FLOTTILLE_LIB_SIH_Fileyeurs), fill = factor(fleet_DEFIPEL_Chalutiers))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +   xlab("Fleet name (SIH, Fileyeurs)") + ylab("Frequency") + labs(fill = "Fleet name (DEFIPEL, Chalutiers)")
+
+
+ggplot( compare[!is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("FLOTTILLE_LIB_SIH_Fileyeurs", "strategy_DEFIPEL_Chalutiers")], aes(factor(FLOTTILLE_LIB_SIH_Fileyeurs), fill = factor(strategy_DEFIPEL_Chalutiers))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +   xlab("Fleet name (SIH, Fileyeurs)") + ylab("Frequency") + labs(fill = "Strategy name (DEFIPEL, Chalutiers)")
+
+
+
+
+
+
+
+ggplot( compare[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$fleet_DEFIPEL_Chalutiers), c("S_FLOTTILLE_LIB_SIH_Fileyeurs", "fleet_DEFIPEL_Chalutiers")], aes(factor(S_FLOTTILLE_LIB_SIH_Fileyeurs), fill = factor(fleet_DEFIPEL_Chalutiers))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +    xlab("Subfleet name (SIH, Fileyeurs)") + ylab("Frequency") + labs(fill = "Fleet name (DEFIPEL, Chalutiers)")
+
+
+ggplot( compare[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$strategy_DEFIPEL_Chalutiers), c("S_FLOTTILLE_LIB_SIH_Fileyeurs", "strategy_DEFIPEL_Chalutiers")], aes(factor(S_FLOTTILLE_LIB_SIH_Fileyeurs), fill = factor(strategy_DEFIPEL_Chalutiers))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +   xlab("Subfleet name (SIH, Fileyeurs)") + ylab("Frequency") + labs(fill = "Strategy name (DEFIPEL, Chalutiers)")
+
+
+
+
+
+
+
+
+
+
+
+
+ggplot( compare[!is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$fleet_isis), c("FLOTTILLE_LIB_SIH_Fileyeurs", "fleet_isis")], aes(factor(FLOTTILLE_LIB_SIH_Fileyeurs), fill = factor(fleet_isis))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +    xlab("Fleet name (SIH, Fileyeurs)") + ylab("Frequency") + labs(fill = "Fleet name (DEFIPEL, Chalutiers)")
+
+
+
+ggplot( compare[!is.na(compare$FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$strategy_isis), c("FLOTTILLE_LIB_SIH_Fileyeurs", "strategy_isis")], aes(factor(FLOTTILLE_LIB_SIH_Fileyeurs), fill = factor(strategy_isis))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +    xlab("Fleet name (SIH, Fileyeurs)") + ylab("Frequency") + labs(fill = "Strategy name (DEFIPEL, Chalutiers)")
+
+
+
+
+
+
+
+ggplot( compare[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$fleet_isis), c("S_FLOTTILLE_LIB_SIH_Fileyeurs", "fleet_isis")], aes(factor(S_FLOTTILLE_LIB_SIH_Fileyeurs), fill = factor(fleet_isis))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +    xlab("Subfleet name (SIH, Fileyeurs)") + ylab("Frequency") + labs(fill = "Fleet name (DEFIPEL, Chalutiers)")
+
+
+
+ggplot( compare[!is.na(compare$S_FLOTTILLE_LIB_SIH_Fileyeurs) & !is.na(compare$strategy_isis), c("S_FLOTTILLE_LIB_SIH_Fileyeurs", "strategy_isis")], aes(factor(S_FLOTTILLE_LIB_SIH_Fileyeurs), fill = factor(strategy_isis))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +    xlab("Subfleet name (SIH, Fileyeurs)") + ylab("Frequency") + labs(fill = "Strategy name (DEFIPEL, Chalutiers)")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ggplot( compare[!is.na(compare$strategy_DEFIPEL_Chalutiers) & !is.na(compare$strategy_isis), c("strategy_DEFIPEL_Chalutiers", "strategy_isis")], aes(factor(strategy_DEFIPEL_Chalutiers), fill = factor(strategy_isis))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +    xlab("Strategy name (DEFIPEL, Chalutiers)") + ylab("Frequency") + labs(fill = "Strategy name (isis)")
+
+
+
+
+ggplot( compare[!is.na(compare$fleet_DEFIPEL_Chalutiers) & !is.na(compare$fleet_isis), c("fleet_DEFIPEL_Chalutiers", "fleet_isis")], aes(factor(fleet_DEFIPEL_Chalutiers), fill = factor(fleet_isis))) + 
+    geom_bar(position = "fill")  + theme_minimal(base_size = 15) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +    xlab("Fleet name (DEFIPEL, Chalutiers)") + ylab("Frequency") + labs(fill = "Fleet name (isis)")
+
+
+
+
+
+
+
+
+```
+
