@@ -102,7 +102,7 @@ Using the dataset (data_vessel) describing yearly vessels' behaviors, we produce
 
 setwd("~/Data/SACROIS")
 
-data_vessel=readRDS("data_vessel_2019_2022.rds")
+data_vessel=readRDS("data_vessel_2000_2022.rds")
 
 
 data_vessel=data_vessel[,-c("ENG1", "ENG2")] #declarative data, prone to errors !
@@ -111,7 +111,7 @@ data_vessel=data_vessel[,-c("ENG1", "ENG2")] #declarative data, prone to errors 
 #In the very special case of tides starting before the first year of interest or occurring after the last year of interest, the vessels' ID and associated data are removed:
 
 
-data_vessel=data_vessel[!grep("_2018$", NAVS_COD_YEAR)]
+#data_vessel=data_vessel[!grep("_2018$", NAVS_COD_YEAR)]
 data_vessel=data_vessel[!grep("_2023$", NAVS_COD_YEAR)]
 
 
@@ -119,9 +119,9 @@ data_vessel=data_vessel[!grep("_2023$", NAVS_COD_YEAR)]
 
 #removal of data on ports of activity (considered as too precise information compared to other variables with a risk of clusterisation only on its base + less relevant for describing the vessels' strategy and ultimately its impact on bycatch than the rest)
 
-#data_vessel=data_vessel[,-grep(colnames(data_vessel), pattern="_port")]
+data_vessel=data_vessel[,-grep(colnames(data_vessel), pattern="_port"), with=FALSE]
 
-
+#other solution with data.table: data_vessel[, .SD, .SDcols = ! names(data_vessel) %like% "_port"]
 
 
 
@@ -137,7 +137,7 @@ setDF(data_vessel)
 #1) Classification with all existing vessels (all variables with no missing data at the vessel scale)
 
 
-data_vessel_all=data_vessel[,!sapply(data_vessel,anyNA)] # keep only information about location, engines and temporality
+data_vessel_all=data_vessel[,!sapply(data_vessel,anyNA)] # keep only information about location (ICES division), engines and temporality
 
 
 data_vessel_all[,sapply(data_vessel_all,is.numeric)]=
@@ -157,13 +157,13 @@ rownames(data_vessel_all)<-data_vessel_all$NAVS_COD_YEAR
 #to be noticed number of possible dimensions = number of continuous variable + sum(number of categories in each categorical variable - 1)
 
 
-res.famd_all <- FAMD(data_vessel_all[,-1], ncp=6055, graph = FALSE) #mixed data factorial analysis
+res.famd_all <- FAMD(data_vessel_all[,-1], ncp=47209, graph = FALSE) #mixed data factorial analysis
 
 
 fviz_screeplot(res.famd_all) #plot of percentage of explained variance per dimension
 res.famd_all$eig #rather low percentage of explained variance
 
-#no use of dimensions >253 ? (more than 90 % of variance explained) if using Kaiser rule (all eigen value superior to 1) 
+#no use of dimensions >129 ? (more than 82 % of variance explained) if using Kaiser rule (all eigen value superior to 1) 
 
 
 #library(nFactors)
@@ -175,7 +175,7 @@ res.famd_all$eig #rather low percentage of explained variance
 
 
 
-res.famd_all <- FAMD(data_vessel_all[,-1], ncp=253, graph = FALSE) #mixed data factorial analysis
+res.famd_all <- FAMD(data_vessel_all[,-1], ncp=129, graph = FALSE) #mixed data factorial analysis
 
 
 #data_vessel_all=data_vessel_all[,-grep(colnames(data_vessel_all), pattern="_port")]
@@ -384,7 +384,7 @@ res.mca_test$eig
 
 
 
-#2) Classification with most of existing vessels (all variables with <0.2% of missing data at the vessel scale, driving to ~1% of fishing vessels discarded in 2019-2022)
+#2) Classification with most of existing vessels (all variables with <1% of missing data at the vessel scale, driving to ~4% of fishing vessels discarded in 2000-2022)
 
 
 
@@ -392,11 +392,84 @@ res.mca_test$eig
 
 
 
-data_vessel_most=data_vessel[,sapply(data_vessel, function(x) sum(is.na(x))/length(x)<0.002 )] # keep information about location (ICES div, port), engines, temporality, fished taxa (>family), weight, economic value
+data_vessel_most=data_vessel[,sapply(data_vessel, function(x) sum(is.na(x))/length(x)<0.01 )] # keep information about location (ICES div), engines, temporality, fished taxa (>=spp), weight, economic value
 
 
 
-data_vessel_most=na.omit(data_vessel_most) #To be noticed a non-negligible amount of vessels are not considered due to partial missing data (~5% in 2021), maybe a first classification using only non-missing data variable should be needed
+data_vessel_most=na.omit(data_vessel_most) #To be noticed a non-negligible amount of vessels are not considered due to partial missing data (~5% in 2021), maybe a first classification using only non-missing data variable should be needed (NO: too noisy...)
+
+
+
+
+
+
+#selection by retaining minimal information requirement:
+
+setDT(data_vessel)
+
+data_vessel_most=data_vessel[!is.na(value_weight_year) & !is.na(mean_value_weight_marees) & !is.na(value_eco_year)  & !is.na(mean_value_eco_marees) & !is.na(main_spp_nb_year) & !is.na(main_spp_nb_year) & !is.na(main_engine_nb_year) & !is.na(main_ICES_divis_nb_year),] #inclusion of trip variable because of particular case (with two years overlapping trip) due to attribution of the fishing trip to the year it begin
+
+setDF(data_vessel)
+setDF(data_vessel_most)
+data_vessel_most=data_vessel_most[,sapply(data_vessel_most, function(x) !anyNA(x) )]
+
+#only 0.5% of vessels discarded ! To be noticed: due to specific taxon, period or area descriptions, with only missing values for the descriptor
+
+
+
+
+
+
+#selection by removing progressively variables with the most NA values until reaching a threshold of discarded vessels
+
+
+
+# i=0
+# remove=c()
+# #data_vessel_most=na.omit(data_vessel)
+# data_vessel_most_i=data_vessel[,sapply(data_vessel, function(x) sum(is.na(x))/length(x)<0.01 )] #initialization to avoid too long computation time
+# 
+# setDT(data_vessel_most_i)
+# 
+# freq_na=sapply(data_vessel_most_i, function(x) sum(is.na(x))/length(x) )
+# 
+# data_vessel_most=na.omit(data_vessel_most_i)
+# 
+# while (length(data_vessel_most[,NAVS_COD_YEAR])/ length(data_vessel[,1]) <0.97) {
+#   i=i+1;
+#   remove=c(remove, which(freq_na==sort(unique(freq_na), decreasing=T)[i]));
+#    data_vessel_most=na.omit(data_vessel_most_i[,-remove, with=F])
+# }
+# 
+# 
+# setDF(data_vessel_most)
+# 
+# rm("freq_na", "remove", "data_vessel_most_i")
+# gc()
+
+
+#by removing the variables with the most NA values we do not optimize the selection of retained vessels as vessels with few missing values do not have necessarily the same distribution of NA values and this results in discarding a large number of variables... Retaining only a strategic part of variables having their missing values distributed the same way appears to be way  more efficient !!!  
+
+
+
+
+
+
+
+#selection by removing progressively vessels with the most NA values until reaching a threshold of discarded vessels
+
+
+
+# 
+# freq_na=apply(data_vessel, 1, function(x) sum(is.na(x)))
+# 
+# data_vessel_most=data_vessel[which(freq_na<=quantile(freq_na, probs =0.97)),]
+# 
+# 
+# data_vessel_most=data_vessel_most[,sapply(data_vessel_most, function(x) !anyNA(x) )]
+
+
+#as the method before the distribution of NA values in vessels may vary from one another, resulting in discarding a high quantity of variable, rare position of missing value in well-described vessels for key variables make this method completely inoperable !!!!!
 
 
 
@@ -422,7 +495,7 @@ rownames(data_vessel_most)<-data_vessel_most$NAVS_COD_YEAR
 #data_vessel_most=data_vessel_most[,-(13:26)] #removal of fleet classification variable (will be used to test the robustness of our classification)
 
 
-data_vessel_most=data_vessel_most[,-635] #removal of "Pavillon" column, because no variability in 2021 (or 2019-2022)
+#data_vessel_most=data_vessel_most[,-635] #removal of "Pavillon" column, because no variability in 2021 (or 2019-2022)
 
 
 
@@ -447,16 +520,16 @@ sum(sapply(data_vessel_most[,!sapply(data_vessel_most,is.numeric)], function(x) 
 
 
 
-res.famd_most <- FAMD(data_vessel_most[,-1], ncp=5993, graph = FALSE) #mixed data factorial analysis
+res.famd_most <- FAMD(data_vessel_most[,-1], ncp=47209, graph = FALSE) #mixed data factorial analysis
 
 
 fviz_screeplot(res.famd_most) #plot of percentage of explained variance per dimension
-res.famd_most$eig #rather low percentage of explained variance
+eig=res.famd_most$eig #rather low percentage of explained variance
 
-#no use of dimensions >749 ? (more than 91 % of variance explained) if using Kaiser rule (all eigen value superior to 1) 
+#no use of dimensions >1036 ? (more than 87 % of variance explained) if using Kaiser rule (all eigen value superior to 1) 
 
 
-res.famd_most <- FAMD(data_vessel_most[,-1], ncp=749, graph = FALSE)
+res.famd_most <- FAMD(data_vessel_most[,-1], ncp=1036, graph = FALSE)
 
 
 #res.famd_most_without_port <- FAMD(data_vessel_most[,-1], ncp=391, graph = FALSE) #without ports => clusters obtained this way are A LOT clearer, it may be wise to introduce port only at higher precision levels (as all other variables at this stage are rather "coarse"), for subfleet definition. This basically means making a pre-segmentation based mainly on gear, targeted taxa groups, ICES zones, temporality and quantitative fishing activity!
@@ -530,7 +603,7 @@ corrplot(cor, type="upper", order="hclust", tl.col="black", tl.srt=45) #visualiz
 
 
 fviz_dist(dist(res.famd_most$ind$coord), show_labels = FALSE) #structure difficult to assess
-
+get_clust_tendency(res.famd_most$ind$coord, n= round(nrow(res.famd_most$ind$coord)*0.1))
 
 # library(clustertend) 
 # hopkins(res.famd_most$ind$coord, n = nrow(res.famd_most$ind$coord)-1)
@@ -684,7 +757,7 @@ fviz_dist(dist(res.famd_most$ind$coord), show_labels = FALSE) #structure difficu
 #a) Estimating the optimal number of cluster:
 
 
-#To be noticed the used hcpc method consist in a kmean clustering initialized with the results of a hierarchical clustering. As such the results is closed to a hierarchical clustering, with slight modification due to the kmean refining. Such methods is mot available in the "fpc" package, we will approximate our clusters by hierarchical clustering and kmean clustering when using "fpc"
+#To be noticed the used hcpc method consist in a kmean clustering initialized with the results of a hierarchical clustering. As such the results is closed to a hierarchical clustering, with slight modification due to the kmean refining. Such methods is not available in the "fpc" package, we will approximate our clusters by hierarchical clustering and kmean clustering when using "fpc"
 
 
 
@@ -1495,7 +1568,7 @@ opt_pred_kmean_most=
                     classification="centroid", centroidname = NULL,
                     cutoff=0.8, distances=FALSE, count=TRUE)
 
-
+#prediction constantly decreasing with cluster numbers... (opt=2)
 
 
 
@@ -1544,6 +1617,64 @@ largeisgood=FALSE)
 
 
 
+
+
+#parallel computing of opt_boot index:
+
+
+setwd("home1/datawork/mbrevet")
+
+res.famd_most=readRDS("res.famd_most_2000_2022_min_var.rds")
+
+library(parallel)
+
+Cores=50
+
+
+
+save_parallel_opt_boot <- mclapply(1:50, function(i) {nselectboot(res.famd_most$ind$coord,B=1,distances=FALSE,clustermethod=kmeansCBI,classification="centroid",centroidname = NULL,krange=2:200, count=F,largeisgood=FALSE)}, mc.preschedule = FALSE)
+
+
+#"socket" parallelization:
+
+library(parallel)
+
+cl <- makeCluster(50)
+clusterEvalQ(cl, library(fpc))
+
+res.famd_most=readRDS("res.famd_most_2000_2022_min_var.rds")
+res.famd_most <- as.data.frame(res.famd_most$ind$coord)[,1:1036]
+clusterExport(cl, "res.famd_most")
+
+rm(res.famd_most)
+gc()
+
+save_parallel_opt_boot <- parLapply(cl, 1:50, function(i) {nselectboot(res.famd_most,B=1,distances=FALSE,clustermethod=kmeansCBI,classification="centroid",centroidname = NULL,krange=2:200, count=F,largeisgood=FALSE)})
+
+saveRDS(save_parallel_opt_boot, "save_parallel_opt_boot.rds")
+
+
+
+
+# c=data.frame(matrix(nrow=200, ncol=0))
+# for (i in 1:50) {c=cbind(c,lapply(opt_boot, function(l) l$stabk)[[i]])}
+# plot(rowSums(c)/50)
+
+# plot(predict(smooth.spline(2:200, (rowSums(c)/50)[-1]), 2:200, deriv = 1))
+# plot(predict(smooth.spline(2:200, (rowSums(c)/50)[-1]), 2:200, deriv = 2))
+
+#exact same prediction of number of optimal cluster (51)... asymptotic behaviour independent of initial conditions
+
+
+
+#with more data:
+
+#ct=cbind(c[1:150,],c1,c2,c3[1:150,])
+
+# plot(predict(smooth.spline(5:150, (rowSums(ct)/50)[-c(1,2,3,4)]), 2:150, deriv = 1))
+# plot(predict(smooth.spline(5:150, (rowSums(ct)/50)[-c(1,2,3,4)]), 2:150, deriv = 2))
+
+#plateau reached at N=37, stabilization of the curve at N=88
 
 
 
@@ -1623,7 +1754,7 @@ plot(opt_boot_kmean_most$stabk[-c(1,200)]-opt_boot_kmean_most$stabk[-c(1,2)])
 
 
 
-#exploration of many bootstrap are necessary to obtain stable estimates:
+#exploration of how many bootstrap are necessary to obtain stable estimates:
 
 
 
@@ -1776,7 +1907,6 @@ sliding_20=c()
 for (i in 2:81) {
   sliding_20=c(sliding_20, sd(apply(stab,2,mean)[i:(i+19)]))
 }
-
 
 min(which(sliding_20<0.001))+1
 
@@ -1935,7 +2065,7 @@ sd(stab_2000_sliding)
 
 
 
-NbClust_ch=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:749], diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 100,
+NbClust_ch=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:1036], diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 100,
         method = "kmeans", index = "ch", alphaBeale = 0.1) #majority at 3 clusters
 #tendency to underestimation
 
@@ -1944,7 +2074,7 @@ NbClust_ch=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:749], diss =
 
 
 
-NbClust_ratkowsky=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:749], diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 800,
+NbClust_ratkowsky=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:1036], diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 800,
         method = "kmeans", index = "ratkowsky", alphaBeale = 0.1) #optimum at 506 clusters
 
 
@@ -1962,7 +2092,7 @@ plot(predict(smooth.spline(2:400, NbClust_ratkowsky$All.index), 2:400, deriv = 2
 
 
 
-NbClust_cindex=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:749], diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 800,
+NbClust_cindex=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:1036], diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 800,
         method = "kmeans", index = "cindex", alphaBeale = 0.1) #optimum at 562 clusters
 
 
@@ -1972,7 +2102,7 @@ NbClust_cindex=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:749], di
 
 
 
-NbClust_tracew=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:749], diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 200,
+NbClust_tracew=NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:1036], diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 200,
         method = "kmeans", index = "tracew", alphaBeale = 0.1) #majority at 41 clusters
 #tendency to underestimation
 
@@ -1994,12 +2124,69 @@ plot(NbClust_tracew$All.index[1:199]-NbClust_tracew$All.index[2:200])
 
 
 
+
+
+#parallel computing of ratkowsky index:
+
+
+setwd("home1/datawork/mbrevet")
+
+res.famd_most=readRDS("res.famd_most_2000_2022_min_var.rds")
+
+library(parallel)
+
+Cores=detectCores()
+
+maxN=800
+
+save <- mclapply(seq(from=2, by=round(maxN/Cores), length.out=Cores), function(i) {NbClust(data = as.data.frame(res.famd_most$ind$coord)[,1:1036], diss = NULL, distance = "euclidean", min.nc = i, max.nc = i+round(maxN/Cores)-1, method = "kmeans", index = "ratkowsky")})
+
+
+
+
+#"socket" parallelization:
+
+library(parallel)
+
+cl <- makeCluster(50)
+clusterEvalQ(cl, library(NbClust))
+
+res.famd_most=readRDS("res.famd_most_2000_2022_min_var.rds")
+res.famd_most <- as.data.frame(res.famd_most$ind$coord)[,1:1036]
+clusterExport(cl, "res.famd_most")
+
+rm(res.famd_most)
+gc()
+
+save_parallel_ratk <- parLapply(cl, 2:51, function(i) {NbClust(data = res.famd_most, diss = NULL, distance = "euclidean", min.nc = i, max.nc = i, method = "kmeans", index = "ratkowsky")})
+
+saveRDS(save_parallel_ratk, "save_parallel_ratk.rds")
+
+
+#visualisation of convergence:
+
+# all_ratk=c(sapply(ratk, function(x) x[[1]]), sapply(ratk2, function(x) x[[1]]), sapply(ratk3, function(x) x[[1]]), sapply(ratk4, function(x) x[[1]]), sapply(ratk5, function(x) x[[1]]), sapply(ratk6, function(x) x[[1]]))
+# plot(all_ratk)
+# 
+# plot(predict(smooth.spline(2:151, all_ratk), 2:151, deriv = 1))
+# plot(predict(smooth.spline(2:151, all_ratk), 2:151, deriv = 2))
+
+#plateau reached at N=31 (clear break), stabilization of the curve at N=92 (more oscillation, N=88 also plausible, but also N=98)
+
+
+
+
+
+
+
+
+
 #b) Clustering:
 
 
 #a) ch method
 
-res.hcpc_all <- HCPC (res.famd_all, graph = FALSE, nb.clust=3)
+res.hcpc_most <- HCPC (res.famd_most, graph = FALSE, nb.clust=3)
 
 
 #### too few categories to have perfectly delimited clusters (highly problematic for the first ones: fisheries on coastal fish associated to algae, trawler associated to trap fishing, tamis à civelle associated to offshore gillnet...), but allow progressive constitution of clusters, with continuous gain of precision, with clusters first defined more by diversity, weight, effort pattern than target taxa, used egines and area of activity
@@ -2012,7 +2199,7 @@ res.hcpc_all <- HCPC (res.famd_all, graph = FALSE, nb.clust=3)
 
 
 
-res.hcpc_all <- HCPC (res.famd_all, graph = FALSE, nb.clust=129)
+res.hcpc_most <- HCPC (res.famd_most, graph = FALSE, nb.clust=129)
 
 
 #good results for the first clustering but not applicable for recursive clustering (too many cluster selected then). To be combined with "ch" methods ?
@@ -2024,7 +2211,7 @@ res.hcpc_all <- HCPC (res.famd_all, graph = FALSE, nb.clust=129)
 #c) ratkowsky method
 
 
-res.hcpc_all <- HCPC (res.famd_all, graph = FALSE, nb.clust=506)
+res.hcpc_most <- HCPC (res.famd_most, graph = FALSE, nb.clust=506)
 
 
 #too many clusters
@@ -2033,7 +2220,7 @@ res.hcpc_all <- HCPC (res.famd_all, graph = FALSE, nb.clust=506)
 
 #d) c index method
 
-res.hcpc_all <- HCPC (res.famd_all, graph = FALSE, nb.clust=562)
+res.hcpc_most <- HCPC (res.famd_most, graph = FALSE, nb.clust=562)
 
 
 #too many clusters
@@ -2979,7 +3166,7 @@ useallg=FALSE) #same than before but comparison on prediction strength instead o
 res.hcpc_most$data.clust$NAVS_COD_YEAR=rownames(res.hcpc_most$data.clust)
 
 
-data_vessel=data_vessel[,-grep(colnames(data_vessel), pattern="_port")]
+#data_vessel=data_vessel[,-grep(colnames(data_vessel), pattern="_port")]
 
 data_vessel=merge(data_vessel, res.hcpc_most$data.clust[,c("NAVS_COD_YEAR","clust")])
 
@@ -3036,9 +3223,9 @@ d=c()
 for (i in c) {
   if (hopkin[i]<0.05){ # filter by significance of test for cluster tendency (hopkins.pval / dip test)
     d=c(d,i)
-    NbClust[i]=NbClust(data = as.data.frame(eval(as.name(paste0("res.famd_",i)))$ind$coord), diss = NULL, distance = "euclidean", min.nc = 2, max.nc = max(2, as.integer(nrow(eval(as.name(paste0("res.famd_",i)))$ind$coord)/10)),  method = "kmeans", index = "ch", alphaBeale = 0.1)$Best.nc[1]
+    NbClust[i]=NbClust(data = as.data.frame(eval(as.name(paste0("res.famd_",i)))$ind$coord), diss = NULL, distance = "euclidean", min.nc = 2, max.nc = min(max(2, as.integer(nrow(eval(as.name(paste0("res.famd_",i)))$ind$coord)/10)), length(unique(data_vessel$clust))),  method = "kmeans", index = "ch", alphaBeale = 0.1)$Best.nc[1]
   }
-} #to avoid overparametrization and consider proportionnal amount of maximal potential number of cluster we considered that clusters should not include less than 10 vessels in average (completely arbitrary, so disputable, but necessary otherwise particularly large values could be selected without being meaningful !)
+} #to avoid overparametrization and consider proportionnal amount of maximal potential number of cluster we considered that clusters should not include less than 10 vessels in average (completely arbitrary, so disputable, but necessary otherwise particularly large values could be selected without being meaningful !) + to improve interpretability cluster number were not allowed to be superior to the initial number of cluster ! (same: arbitrary, but necessary)
 
 
 
@@ -3091,8 +3278,7 @@ for (i in 1:length(unique(data_vessel$clust))) {
 
 
 
- 
- 
+
  
  
  
@@ -3194,7 +3380,7 @@ d=c()
 for (i in c) {
   if (hopkin[i]<0.05){ 
     d=c(d,i)
-    NbClust[i]=NbClust(data = as.data.frame(eval(as.name(paste0("res.famd_",i)))$ind$coord), diss = NULL, distance = "euclidean", min.nc = 2, max.nc = max(2, as.integer(nrow(eval(as.name(paste0("res.famd_",i)))$ind$coord)/10)),  method = "kmeans", index = "ch", alphaBeale = 0.1)$Best.nc[1]
+    NbClust[i]=NbClust(data = as.data.frame(eval(as.name(paste0("res.famd_",i)))$ind$coord), diss = NULL, distance = "euclidean", min.nc = 2, max.nc = min(max(2, as.integer(nrow(eval(as.name(paste0("res.famd_",i)))$ind$coord)/10)), length(unique(data_vessel$Sous_Flottille_cluster_number))),  method = "kmeans", index = "ch", alphaBeale = 0.1)$Best.nc[1]
   }
 }
 
@@ -3317,8 +3503,8 @@ data_vessel=merge(data_vessel, compare[,c("NAVS_COD_YEAR","Sous_Sous_Flottille_c
 #we also consider the quantitative determinants of clusters by comparing significant quantitative variables between the cluster of interest and all other cluster (in term of standard deviation distance between the mean of interest and all other means)
 
 
-# distance >2sd : cluster with with very high ""
-# distance >sd : cluster with with high ""
+# distance >2sd : cluster with very high ""
+# distance >sd : cluster with high ""
 
 
 
@@ -3333,27 +3519,27 @@ data_vessel=merge(data_vessel, compare[,c("NAVS_COD_YEAR","Sous_Sous_Flottille_c
 
 
 L_def=list(
-  determinant=list( main_sp=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_sp=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_sp=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, port=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
+  determinant=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, PAVILLON=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
   
-       strongly_predominant=list( main_sp=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_sp=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_sp=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, port=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
+       strongly_predominant=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, PAVILLON=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
   
-          predominant=list( main_sp=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_sp=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_sp=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, port=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
+          predominant=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, PAVILLON=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
   
-              major=list( main_sp=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_sp=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_sp=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, port=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
+              major=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, PAVILLON=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
   
-                  strong_component=list( main_sp=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_sp=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_sp=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, port=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
+                  strong_component=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, PAVILLON=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
   
-                        component=list( main_sp=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_sp=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_sp=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, port=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
+                        component=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, PAVILLON=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA) ,
   
-                            minor_component=list( main_sp=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_sp=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_sp=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, port=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA),
+                            minor_component=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, main_engine=NA, mesh_size=NA, second_engine=NA, PAVILLON=NA, QAM_COD=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, SRG_COD=NA, gradient=NA, month=NA, trimester=NA),
         
-                                very_high_values=list( value_weight=NA, value_eco=NA, value_effort=NA, value_prod=NA, value_eco_prod=NA, sd_weight=NA, sd_eco=NA, sd_effort=NA, sd_prod=NA, sd_eco_prod=NA, shannon=NA, simpson=NA, nb_sp_year=NA, prop_sp=NA, second_sp=NA, third_sp=NA, nb_spp_year=NA, prop_spp=NA, second_spp=NA, third_spp=NA, nb_family_year=NA, prop_family=NA, second_family=NA, third_family=NA, nb_order_year=NA, prop_order=NA, second_order=NA, third_order=NA, nb_isscaap_year=NA, prop_isscaap=NA, second_isscaap=NA, third_isscaap=NA, nb_engine=NA, prop_engine=NA, second_engine=NA, nb_mesh_size=NA, prop_mesh_size=NA, mean_mesh_size=NA, nb_zee=NA, prop_zee=NA, nb_gradient=NA, prop_gradient=NA, nb_stat_rect=NA, prop_stat_rect=NA, nb_stat_subrect=NA, prop_stat_subrect=NA, nb_port=NA, prop_port=NA, change_port=NA, nb_seq=NA, nb_marees_year=NA, time_efficiency=NA, sd_time_efficiency=NA, sea_year=NA, prop_month=NA, prop_trimester=NA, sea_marees=NA, sd_sea_marees=NA, CARN_AGE=NA, CARN_EFFECTIF=NA, NAVP=NA),#à améliorer: inclut pour le moment les valeurs spécifiques à certaines classes (espèces, familles, zones...), prod/eco_prod indistinguable, denominateur commun pour mesures diversités ? pour nbre zones, temporelle...?, pas de différenciation value et mean (prefixe value nécessaire partout), pas de differentiation nb et sd_nb !!!!, pas de differentiation mean_sd et sd_, pas de distinction main, second, third ...n pas de distinction prop et nb
+                                very_high_values=list( value_weight=NA, value_eco=NA, value_effort=NA, value_weight.prod=NA, value_eco.prod=NA, sd_weight=NA, sd_eco=NA, sd_effort=NA, sd_weight.prod=NA, sd_eco.prod=NA, div_val_spe=NA, div_sde_spe=NA, div_val_spp=NA, div_sde_spp=NA, div_val_family=NA, div_sde_family=NA, div_val_order=NA, div_sde_order=NA, div_val_isscaap=NA, div_sde_isscaap=NA, prop_spe=NA, second_spe=NA, third_spe=NA, prop_spp=NA, second_spp=NA, third_spp=NA, prop_family=NA, second_family=NA, third_family=NA, prop_order=NA, second_order=NA, third_order=NA,  prop_isscaap=NA, second_isscaap=NA, third_isscaap=NA, value_nb_engine=NA, div_val_engine=NA, div_sde_engine=NA, prop_engine=NA, second_engine=NA, nb_engines_dim=NA, div_val_engines_dim=NA, value_nb_mesh_size=NA, div_val_mesh_size=NA, prop_mesh_size=NA, mean_mesh_size=NA, sde_mesh_size=NA, value_nb_zee=NA, div_val_zee=NA, div_sde_zee=NA, prop_zee=NA, value_nb_gradient=NA, div_val_gradient=NA, div_sde_gradient=NA, prop_gradient=NA, value_nb_ICES_divis=NA, div_val_ICES_divis=NA, div_sde_ICES_divis=NA, prop_ICES_divis=NA, value_nb_stat_rect=NA, div_val_stat_rect=NA, div_sde_stat_rect=NA, prop_stat_rect=NA, value_nb_stat_subrect=NA, div_val_stat_subrect=NA, div_sde_stat_subrect=NA, prop_stat_subrect=NA, value_nb_seq=NA, sd_nb_seq=NA, value_nb_marees=NA, value_time_efficiency=NA, sd_time_efficiency=NA, value_sea_time=NA, sd_sea_time=NA, sea_year=NA, value_average_sea=NA, sd_average_sea=NA, div_val_days=NA, div_sde_days=NA, div_val_months=NA, div_val_trimester=NA, prop_month=NA, prop_trimester=NA, mean_sea_days_marees=NA, sd_sea_days_marees=NA, CARN_AGE=NA, CARN_EFFECTIF=NA, NAVP=NA),# nb/div_engine_dim = nb/div_engine (changer engine_dim en engines_dim ?) / mean_nb_seq=value_nb_seq=sd_nb_seq (changer mean en mean_value et faire sélection dessus) / mean_sea_time=sea_time=sd_sea_time  + combiner au reste sea_year (en ajoutant "year" au précédent) / dans les combinaisons sd+mean, erreur: dès que sd apparait, value ne doit pas apparaitre ! / mean_sea_day/month/trimester=sd_sea_... (il faut ajouter value !) / probleme div-ICES_div (changer en ICES_divis ?) / problème div vs. sd_div vs sd_weight (ajout "val" pour all div autres que sd et remplacement "sd" par "sde" pour les divs et nb ! et ajout type sde_spe_div) / probleme pour les moyennes et sd pondérés, font écho aux valeurs,sd sur métriques poids, eco, etc (enlever "value" et remplacer sd par sde)
   
-                                    high_values=list( value_weight=NA, value_eco=NA, value_effort=NA, value_prod=NA, value_eco_prod=NA, sd_weight=NA, sd_eco=NA, sd_effort=NA, sd_prod=NA, sd_eco_prod=NA, shannon=NA, simpson=NA, nb_sp_year=NA, prop_sp=NA, second_sp=NA, third_sp=NA, nb_spp_year=NA, prop_spp=NA, second_spp=NA, third_spp=NA, nb_family_year=NA, prop_family=NA, second_family=NA, third_family=NA, nb_order_year=NA, prop_order=NA, second_order=NA, third_order=NA, nb_isscaap_year=NA, prop_isscaap=NA, second_isscaap=NA, third_isscaap=NA, nb_engine=NA, prop_engine=NA, second_engine=NA, nb_mesh_size=NA, prop_mesh_size=NA, mean_mesh_size=NA, nb_zee=NA, prop_zee=NA, nb_gradient=NA, prop_gradient=NA, nb_stat_rect=NA, prop_stat_rect=NA, nb_stat_subrect=NA, prop_stat_subrect=NA, nb_port=NA, prop_port=NA, change_port=NA, nb_seq=NA, nb_marees_year=NA, time_efficiency=NA, sd_time_efficiency=NA, sea_year=NA, prop_month=NA, prop_trimester=NA, sea_marees=NA, sd_sea_marees=NA, CARN_AGE=NA, CARN_EFFECTIF=NA, NAVP=NA), 
+                                    high_values=list( value_weight=NA, value_eco=NA, value_effort=NA, value_weight.prod=NA, value_eco.prod=NA, sd_weight=NA, sd_eco=NA, sd_effort=NA, sd_weight.prod=NA, sd_eco.prod=NA, div_val_spe=NA, div_sde_spe=NA, div_val_spp=NA, div_sde_spp=NA, div_val_family=NA, div_sde_family=NA, div_val_order=NA, div_sde_order=NA, div_val_isscaap=NA, div_sde_isscaap=NA, prop_spe=NA, second_spe=NA, third_spe=NA, prop_spp=NA, second_spp=NA, third_spp=NA, prop_family=NA, second_family=NA, third_family=NA, prop_order=NA, second_order=NA, third_order=NA,  prop_isscaap=NA, second_isscaap=NA, third_isscaap=NA, value_nb_engine=NA, div_val_engine=NA, div_sde_engine=NA, prop_engine=NA, second_engine=NA, nb_engines_dim=NA, div_val_engines_dim=NA, value_nb_mesh_size=NA, div_val_mesh_size=NA, prop_mesh_size=NA, mean_mesh_size=NA, sde_mesh_size=NA, value_nb_zee=NA, div_val_zee=NA, div_sde_zee=NA, prop_zee=NA, value_nb_gradient=NA, div_val_gradient=NA, div_sde_gradient=NA, prop_gradient=NA, value_nb_ICES_divis=NA, div_val_ICES_divis=NA, div_sde_ICES_divis=NA, prop_ICES_divis=NA, value_nb_stat_rect=NA, div_val_stat_rect=NA, div_sde_stat_rect=NA, prop_stat_rect=NA, value_nb_stat_subrect=NA, div_val_stat_subrect=NA, div_sde_stat_subrect=NA, prop_stat_subrect=NA, value_nb_seq=NA, sd_nb_seq=NA, value_nb_marees=NA, value_time_efficiency=NA, sd_time_efficiency=NA, value_sea_time=NA, sd_sea_time=NA, sea_year=NA, value_average_sea=NA, sd_average_sea=NA, div_val_days=NA, div_sde_days=NA, div_val_months=NA, div_val_trimester=NA, prop_month=NA, prop_trimester=NA, mean_sea_days_marees=NA, sd_sea_days_marees=NA, CARN_AGE=NA, CARN_EFFECTIF=NA, NAVP=NA), 
   
-                                         very_high_values_cat= list( sp=NA, spp=NA, family=NA, order=NA, isscaap=NA, ICES=NA),
+                                         very_high_values_cat= list( SPE=NA, SPP=NA, FAMILY=NA, ORDER=NA, ISSCAAP=NA, ICES_DIVIS=NA, DIV_ICES_DIVIS_tax=NA, DIV_ICES_DIVIS_engine=NA, GRADIENT=NA, DIV_GRADIENT_tax=NA, DIV_GRADIENT_engine=NA, MONTH=NA, DIV_MONTH_tax=NA, DIV_MONTH_engine=NA, DIV_MONTH_spat=NA, TRIMESTER=NA, DIV_TRIMESTER_tax=NA, DIV_TRIMESTER_engine=NA, DIV_TRIMESTER_spat=NA),
                                          
-                                                high_values_cat= list( sp=NA, spp=NA, family=NA, order=NA, isscaap=NA, ICES=NA) )
+                                                high_values_cat= list( SPE=NA, SPP=NA, FAMILY=NA, ORDER=NA, ISSCAAP=NA, ICES_DIVIS=NA, DIV_ICES_DIVIS_tax=NA, DIV_ICES_DIVIS_engine=NA, GRADIENT=NA, DIV_GRADIENT_tax=NA, DIV_GRADIENT_engine=NA, MONTH=NA, DIV_MONTH_tax=NA, DIV_MONTH_engine=NA, DIV_MONTH_spat=NA, TRIMESTER=NA, DIV_TRIMESTER_tax=NA, DIV_TRIMESTER_engine=NA, DIV_TRIMESTER_spat=NA) ) #ne permet pas de différencier classes différant par haute valeur ou proportion et classe différant par niveau diversité pour ICES, month et trimester (si utiliser besoin de denominateur les différant: mise en majuscule !)
 
 
 
@@ -3363,6 +3549,10 @@ for (i in d) {
   for (j in unique(eval(as.name(paste0("res.hcpc_", i)))$data.clust$clust)) {
     
 desc=as.data.frame(eval(as.name(paste0("res.hcpc_", i)))$desc.var$category[[j]]);
+x=L_def;
+
+if (dim(desc)[1]!=0) {
+
 desc$det=0;
 desc$det[desc$`Mod/Cla`>95]=1
 desc$det[desc$`Mod/Cla`>80 & desc$`Mod/Cla`<=95]=2;
@@ -3388,7 +3578,6 @@ desc=desc[!duplicated(desc$cat),];
 
 
 
-x=L_def
 
 for (k in 1:7) {
   if (length(desc$names)!=0) {
@@ -3397,9 +3586,9 @@ for (k in 1:7) {
         x[[k]][[l]]=desc[sapply(str_split(desc$names, pattern="_"), function(x) all(unlist(str_split(names(L_def[[k]])[l], pattern="_")) %in% x)) & desc$det==k,]$cat
    }
  } 
-}};
+}}
 
-
+};
 
 # Quantitative determinants:
 
@@ -3464,13 +3653,13 @@ for (k in 10:11) {
 
 
 
-for (k in 1:6) {
+for (k in 1:5) {
   x[[10]][[k]]=x[[10]][[k]][!duplicated(x[[10]][[k]])];
   x[[11]][[k]]=x[[11]][[k]][!duplicated(x[[11]][[k]])]
 }
 
 
-for (k in 1:6) {
+for (k in 1:5) {
   x[[11]][[k]]=x[[11]][[k]][sapply(x[[11]][[k]], function(y) !(y %in% unlist(x)[[10]]) )]
 }
 
@@ -3657,6 +3846,13 @@ for (i in 1:4) {
 
 name_clust2=data.frame(clust2=1:51, name_clust2=c("Glass eels fishing, northern Bay of Biscay","","","","","","","","","Mostly meagre fishing, drift gillnet, southern Bay of Biscay","Glass eels fishing and/or misc. coastal fishes, gillnets","","","","","","Prawn fishing, traps and pots, northern Bay of Biscay","Mostly sardine and herring fishing, pocket seine, mostly in western Channel","","Sea bream fishing, encircling gillnets, southern Bay of Biscay","","","","Decapod fishing, traps and pots, northern Bay of Biscay", "Misc. coastal fishes (mostly basses), northern Bay of Biscay", "Misc. demersal fishes (mostly conger and gadoids), set longlines, northern Bay of Biscay", "Octopus fishing, traps and pots, northern Bay of Biscay", "","","Scallops and flatfish fishing, fishing dredge, western Channel sea and northern Bay of Biscay","Sardine and herring fishing, pelagic trawling, northern Bay of Biscay","","Hake fishing, fixed gillnets, mostly south-west of Ireland - eastern part", "Gadoids (mainly cod, haddock) fishing, northern Bay of Biscay","","Sole fishing, trammel nets", "","Sole, cephalopod and misc. coastal fishes fishing, bottom otter trawling","","","Gadoids, shrimp-lobster and other decapod fishing, twin otter trawls, northern Bay of Biscay", "","","Tuna, gadoids fishing, pelagic pair trawling, mostly northern part of Bay of Biscay","","Gadoids, misc. coastal fishes and cephalopods fishing, Danish seine, Bay of Biscay","Anglerfish fishing, mostly twin otter trawls","Gadoids, flatfish and anglerfish fishing, twin otter trawls, mostly Northern Celtic Sea","Gadoids fishing, bottom otter trawls, mostly Western Channel and Northern Celtic Sea","",""))
 
+
+name_sub_clust2=data.frame(Sous_Flottille_cluster_number2=c("34.1","34.2","34.3","36.1","36.2","44.1","44.2","44.3"), name_sub_clust2=c("Gadoids fishing, mainly lines (longline, handline)","Gadoids fishing (predominance of pout), mainly gillnets (fixed, trammel) from southern Britanny coasts", "Hake fishing (also pout and secondary catch of sole), gillnets (fixed, trammels), offshore and 3-12 miles zone, mainly from Pays de la Loire", "Sole fishing, trammel nets, diverse areas of activity", "Sole fishing, trammel nets, higher volumes, temporal activity, mainly in Aquitaine plateau", "Mackerell and gadoids fishing, with secondary tuna fishing, pelagic pair trawling, 70mm mesh size, from french basque country, in Basque coast and South West Ireland - East", "Tuna fishing (also gadoids, soles), pelagic pair trawling, 80-100mm mesh size, offshore fishing mainly from Pays de la Loire, in Iberic part of Bay of Biscay and South West Ireland - East", "Tuna fishing (also anglerfish and rays), pelagic pair trawling, 100mm mesh size, offshore fishing mainly from southern Britanny, in Iberic part of bay of Biscay and Southern Celtic Sea"))
+
+
+name_sub_sub_clust2=data.frame(Sous_Sous_Flottille_cluster_number2=c("34.1.1","34.1.2","34.1.3","34.1.4","34.1.5","34.2.1","34.2.2","34.3.1","34.3.2","36.1.1","36.1.2","36.2.1","36.2.2","36.2.3"), name_sub_sub_clust2=c("Bass and pollack, from southern Brittany, mainly handlines, coastal fishing", "Sole fishing, trammel net and longline, southern bay of Biscay", "Hake fishing, fixed longlines, from Bayonne and surroundings", "Gadoids fishing (mainly pout and whiting, but also conger), fixed longlines, mainly from Pays de la Loire", "Gadoids and hake fishing, trammel and longline","Pout fishing, mainly from southern britanny coasts", "Gadoids fishing (pout, pollack, but also brill, sole and edible crab), from southern Britanny","Hake fishing", "Gadoids, lobster fishing, bottom trawling, northern Brittany", "Soles and gadoids fishing, gillnets and trammel nets, Brittany's northern tip", "Sole fishing trammel nets", "Wedge sole and pout fishing (secondary catch of cuttlefish and sole), bottom trawling", "Sole and brill fishing (secondary catch of bass, gadoids and hake), trammel net, 100mm mesh size, offshore and 3-12 miles, southern bay of biscay", "Sole fishing, also edible crab, trammel net, 100mm mesh size, offshore and 3-12 miles, northern bay of Biscay"))
+
+
 ```
 
 
@@ -3681,14 +3877,14 @@ name_clust2=data.frame(clust2=1:51, name_clust2=c("Glass eels fishing, northern 
 
 ```{r distribution of dolphin bycatch}
 
-DCO_DECL_BYC=readRDS("DCO_DECL_BYC.rds")
+DCO_DECL_BYC=readRDS("DCO_DECL_BYC_simp.rds")
 
 DCO_DECL_BYC$NAVS_COD_YEAR=paste(DCO_DECL_BYC$NAVS_COD, DCO_DECL_BYC$AN, sep="_")
 
 
 
 
-DCO_DECL_BYC=merge(DCO_DECL_BYC, data_vessel[, c("NAVS_COD_YEAR", "clust", "Sous_Flottille_cluster_number", "Sous_Sous_Flottille_cluster_number")], all.x = T, all.y=F)
+DCO_DECL_BYC=merge(DCO_DECL_BYC, data_vessel[, c("NAVS_COD_YEAR", "clust", "Sous_Flottille_cluster_number", "Sous_Sous_Flottille_cluster_number", "Sous_Sous_Sous_Flottille_cluster_number")], all.x = T, all.y=F)
 
 
 
@@ -3724,36 +3920,36 @@ ggplot(DCO_DECL_BYC, aes(Sous_Sous_Flottille_cluster_number)) +
 
 
 
-OBSMER_BYC_2019_2022=readRDS("OBSMER_BYC_2019_2022.rds")
+OBSMER_BYC=readRDS("OBSMER_BYC.rds")
 
-OBSMER_BYC_2019_2022$NAVS_COD_YEAR=paste(OBSMER_BYC_2019_2022$ID_NAVIRE, OBSMER_BYC_2019_2022$ANNEE, sep="_")
-
-
-
-
-OBSMER_BYC_2019_2022=merge(OBSMER_BYC_2019_2022, data_vessel[, c("NAVS_COD_YEAR", "clust", "Sous_Flottille_cluster_number", "Sous_Sous_Flottille_cluster_number")], by="NAVS_COD_YEAR", all.x = T, all.y=F)
+OBSMER_BYC$NAVS_COD_YEAR=paste(OBSMER_BYC$ID_NAVIRE, OBSMER_BYC$ANNEE, sep="_")
 
 
 
 
+OBSMER_BYC=merge(OBSMER_BYC, data_vessel[, c("NAVS_COD_YEAR", "clust", "Sous_Flottille_cluster_number", "Sous_Sous_Flottille_cluster_number")], by="NAVS_COD_YEAR", all.x = T, all.y=F)
 
-table(OBSMER_BYC_2019_2022$clust)
 
-ggplot(OBSMER_BYC_2019_2022, aes(clust)) +
+
+
+
+table(OBSMER_BYC$clust)
+
+ggplot(OBSMER_BYC, aes(clust)) +
     geom_bar()
 
 
 
-table(OBSMER_BYC_2019_2022$Sous_Flottille_cluster_number)
+table(OBSMER_BYC$Sous_Flottille_cluster_number)
 
-ggplot(OBSMER_BYC_2019_2022, aes(Sous_Flottille_cluster_number)) +
+ggplot(OBSMER_BYC, aes(Sous_Flottille_cluster_number)) +
     geom_bar()
 
 
 
-table(OBSMER_BYC_2019_2022$Sous_Sous_Flottille_cluster_number)
+table(OBSMER_BYC$Sous_Sous_Flottille_cluster_number)
 
-ggplot(OBSMER_BYC_2019_2022, aes(Sous_Sous_Flottille_cluster_number)) +
+ggplot(OBSMER_BYC, aes(Sous_Sous_Flottille_cluster_number)) +
     geom_bar()
 
 
@@ -3771,14 +3967,72 @@ ggplot(OBSMER_BYC_2019_2022, aes(Sous_Sous_Flottille_cluster_number)) +
 
 #Poster Plot:
 
-# Bycatch=rbind(DCO_DECL_BYC[,c("name_clust2","NAVS_COD_YEAR")], OBSMER_BYC_2019_2022[,c("name_clust2","NAVS_COD_YEAR")])
-# 
-# Bycatch$Prog=rep(c("Fishermen Declaration","OBSMER Program (on-board observers, based on voluntary participation of fishermen)"), times=c(length(DCO_DECL_BYC$clust2), length(OBSMER_BYC_2019_2022$clust2)))
-# 
-# ggplot(Bycatch[!is.na(Bycatch$name_clust2),], aes(forcats::fct_infreq(str_wrap(name_clust2,50)))) +
-#     geom_bar(aes(fill=(str_wrap(Prog,40))), position="dodge") + theme_gray(base_size = 22) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position = "left") + labs(x= "Strategies with at least one accidental bycatch event (Common dolphin)", y = "Bycatch events count", fill="Observation Program")
+Bycatch=rbind(DCO_DECL_BYC[,c("name_clust2","NAVS_COD_YEAR")], OBSMER_BYC[,c("name_clust2","NAVS_COD_YEAR")])
+
+Bycatch$Prog=rep(c("Fishermen Declaration","OBSMER Program (on-board observers, based on voluntary participation of fishermen)"), times=c(length(DCO_DECL_BYC$clust2), length(OBSMER_BYC$clust2)))
+
+ggplot(Bycatch[!is.na(Bycatch$name_clust2),], aes(forcats::fct_infreq(str_wrap(name_clust2,50)))) +
+    geom_bar(aes(fill=(str_wrap(Prog,40))), position="dodge") + theme_gray(base_size = 22) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position = "left") + labs(x= "Strategies with at least one accidental bycatch event (Common dolphin)", y = "Bycatch events count", fill="Observation Program")
 
 
+Bycatch_rate=data.frame(rates= c(as.vector(table(Bycatch[Bycatch$Prog=="Fishermen Declaration",]$name_clust2)/table(data_vessel$name_clust2)[names(table(data_vessel$name_clust2)) %in% names(table(Bycatch[Bycatch$Prog=="Fishermen Declaration",]$name_clust2))]), as.vector(table(Bycatch[Bycatch$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_clust2)/table(data_vessel$name_clust2)[names(table(data_vessel$name_clust2)) %in% names(table(Bycatch[Bycatch$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_clust2))])), Prog=rep(c("Fishermen Declaration", "OBSMER Program (on-board observers, based on voluntary participation of fishermen)"), times=c(6,10)), name_clust2= c(as.vector(names(table(Bycatch[Bycatch$Prog=="Fishermen Declaration",]$name_clust2))), as.vector(names(table(Bycatch[Bycatch$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_clust2)))))
+
+
+
+ggplot(Bycatch_rate, aes(x=forcats::fct_infreq(str_wrap(name_clust2,50), w=rates), y=rates, fill=str_wrap(Prog,40))) +
+    geom_bar(stat="identity", position="dodge") + theme_gray(base_size = 22) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position = "left") + labs(x= "Strategies with at least one accidental bycatch event (Common dolphin)", y = "Bycatch events\nfrequency", fill="Observation Program")
+
+
+
+
+
+
+
+
+Bycatch_sub=rbind(DCO_DECL_BYC[,c("name_sub_clust2","NAVS_COD_YEAR")], OBSMER_BYC[,c("name_sub_clust2","NAVS_COD_YEAR")])
+
+Bycatch_sub$Prog=rep(c("Fishermen Declaration","OBSMER Program (on-board observers, based on voluntary participation of fishermen)"), times=c(length(DCO_DECL_BYC$name_sub_clust2), length(OBSMER_BYC$name_sub_clust2)))
+
+ggplot(Bycatch_sub[!is.na(Bycatch_sub$name_sub_clust2),], aes(forcats::fct_infreq(str_wrap(name_sub_clust2,50)))) +
+    geom_bar(aes(fill=(str_wrap(Prog,40))), position="dodge") + theme_gray(base_size = 22) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position = "left") + labs(x= "Sub-strategies with at least one accidental bycatch event (Common dolphin)", y = "Bycatch events\ncount", fill="Observation Program")
+
+
+Bycatch_sub_rate=
+  data.frame(rates= c(as.vector(table(Bycatch_sub[Bycatch_sub$Prog=="Fishermen Declaration",]$name_sub_clust2)/table(data_vessel$name_sub_clust2)[names(table(data_vessel$name_sub_clust2)) %in% names(table(Bycatch_sub[Bycatch_sub$Prog=="Fishermen Declaration",]$name_sub_clust2))]), as.vector(table(Bycatch_sub[Bycatch_sub$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_sub_clust2)/table(data_vessel$name_sub_clust2)[names(table(data_vessel$name_sub_clust2)) %in% names(table(Bycatch_sub[Bycatch_sub$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_sub_clust2))])), Prog=rep(c("Fishermen Declaration", "OBSMER Program (on-board observers, based on voluntary participation of fishermen)"), times=c(7,6)), name_sub_clust2= c(as.vector(names(table(Bycatch_sub[Bycatch_sub$Prog=="Fishermen Declaration",]$name_sub_clust2))), as.vector(names(table(Bycatch_sub[Bycatch_sub$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_sub_clust2)))))
+
+
+
+ggplot(Bycatch_sub_rate, aes(x=forcats::fct_infreq(str_wrap(name_sub_clust2,50), w=rates), y=rates, fill=str_wrap(Prog,40))) +
+    geom_bar(stat="identity", position="dodge") + theme_gray(base_size = 22) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position = "left") + labs(x= "Sub-strategies with at least one accidental bycatch event (Common dolphin)", y = "Bycatch events\nfrequency", fill="Observation Program")
+
+
+
+
+
+
+
+
+
+Bycatch_sub_sub=rbind(DCO_DECL_BYC[,c("name_sub_sub_clust2","NAVS_COD_YEAR")], OBSMER_BYC[,c("name_sub_sub_clust2","NAVS_COD_YEAR")])
+
+Bycatch_sub_sub$Prog=rep(c("Fishermen Declaration","OBSMER Program (on-board observers, based on voluntary participation of fishermen)"), times=c(length(DCO_DECL_BYC$name_sub_sub_clust2), length(OBSMER_BYC$name_sub_sub_clust2)))
+
+ggplot(Bycatch_sub_sub[!is.na(Bycatch_sub_sub$name_sub_sub_clust2),], aes(forcats::fct_infreq(str_wrap(name_sub_sub_clust2,50)))) +
+    geom_bar(aes(fill=(str_wrap(Prog,40))), position="dodge") + theme_gray(base_size = 22) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position = "left") + labs(x= "Sub-sub-strategies with at least one accidental bycatch event (Common dolphin)", y = "Bycatch events\ncount", fill="Observation Program")
+
+
+Bycatch_sub_sub_rate=
+  data.frame(rates= c(as.vector(table(Bycatch_sub_sub[Bycatch_sub_sub$Prog=="Fishermen Declaration",]$name_sub_sub_clust2)/table(data_vessel$name_sub_sub_clust2)[names(table(data_vessel$name_sub_sub_clust2)) %in% names(table(Bycatch_sub_sub[Bycatch_sub_sub$Prog=="Fishermen Declaration",]$name_sub_sub_clust2))]), as.vector(table(Bycatch_sub_sub[Bycatch_sub_sub$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_sub_sub_clust2)/table(data_vessel$name_sub_sub_clust2)[names(table(data_vessel$name_sub_sub_clust2)) %in% names(table(Bycatch_sub_sub[Bycatch_sub_sub$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_sub_sub_clust2))])), Prog=rep(c("Fishermen Declaration", "OBSMER Program (on-board observers, based on voluntary participation of fishermen)"), times=c(7,6)), name_sub_sub_clust2= c(as.vector(names(table(Bycatch_sub_sub[Bycatch_sub_sub$Prog=="Fishermen Declaration",]$name_sub_sub_clust2))), as.vector(names(table(Bycatch_sub_sub[Bycatch_sub_sub$Prog=="OBSMER Program (on-board observers, based on voluntary participation of fishermen)",]$name_sub_sub_clust2)))))
+
+
+
+ggplot(Bycatch_sub_sub_rate, aes(x=forcats::fct_infreq(str_wrap(name_sub_sub_clust2,50), w=rates), y=rates, fill=str_wrap(Prog,40))) +
+    geom_bar(stat="identity", position="dodge") + theme_gray(base_size = 22) + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position = "left") + labs(x= "Sub-sub-strategies with at least one accidental bycatch event (Common dolphin)", y = "Bycatch events\nfrequency", fill="Observation Program")
+
+
+
+
+#ggplot(Bycatch, aes(YEAR, fill = clust.x)) + geom_bar(position = "stack") #evolution of capture through years
 
 ```
 
