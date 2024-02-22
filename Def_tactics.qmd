@@ -1,0 +1,1406 @@
+---
+title: "Def_tactics"
+format: html
+editor: source
+toc: true # [false, true] Include a table of contents in the document
+number-sections: true # [false, true] Should section headings be numbered?
+---
+
+
+```{r loading used packages and functions}
+
+# Coded on R version 4.3.1 ("Beagle Scouts"), Rstudio version "Mountain Hydrangea" (2023.06.0)
+
+
+
+library(stringr) # string processing package
+
+library(vegan) #computation of diversity indexes 
+
+library(kableExtra) # conversion/modification of table in different format (e.g. from R format to Latex format)
+
+library(data.table) #more efficient management of large data sets
+
+library(microbenchmark) # assess efficiency of codes (in system time)
+
+library(RVAideMemoire) #used for post-hoc tests in exploratory analyses
+
+
+
+
+library(arules)
+library(arulesViz) # packages on association rule mining (“market-basket” model of data), "A-priori" algorithm allowing to identify most associated categories
+
+
+
+
+
+
+
+  pop.sd <- function(x) sqrt(sum((x - mean(x))^2)/(length(x)))
+  
+  #population sd (biased estimate: divided by n not by n-1, necessary here because we want vessels with only one values to be categorized as vessels with null variance and not as vessels with missing variance)
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  #### functions describing diversity:
+  
+  
+    # number of categories:
+  
+  
+  number_cat <- function(data, ID, value, averaged=FALSE, scale=NULL, SD=FALSE) { # data: data.table format, analysed dataset / ID: character, name of the variable containing individual trip or vessel IDs - WARNING: when using the function with averaging at trip level the ID MUST take into account overlapping fishing trip (attributing it to a unique vessel => "vessel_ID" in our case) / value: character, name of the categorical variable for which we want to obtain the number of categories / averaged: boolean, is the number of categories averaged between different levels ? / scale: character, if averaged==T, name of the variable indicating the different levels to consider, e.g. trip or sequence IDs / SD: boolean, if TRUE return the Standard deviation between the different level 
+    .ID=as.name(ID);
+    .value=as.name(value); #converting strings input in names
+    if (!averaged) {
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value),   #removing NAs to avoid taking them into account for the count number
+                length( 
+                  unique(value)),  #number of occurence per ID
+                     by=ID], list(ID=.ID, value=.value)))
+    }
+    else {
+      .scale=as.name(scale);
+      eval(
+        substitute(
+          SACROIS[!is.na(value),
+                    length( 
+                      unique(value)), #number of occurence per scale unit
+                        by=.(ID,scale)] [, ifelse(SD, pop.sd(V1), mean(V1)), #averaged/SD over ID
+                                          by=ID ], list(ID=.ID, value=.value, scale=.scale)))
+    }
+  }
+  
+  
+  
+
+  
+  
+  
+  
+  
+    
+    # diversity indexes:
+  
+  
+  div_index <- function(data, ID, value, method="simpson", abundance=NULL, constant=FALSE, event, averaged=FALSE, scale=NULL, SD=FALSE) { # data: data.table format, analysed dataset / ID: character, name of the variable containing individual trip or vessel IDs - WARNING: when using the function with averaging at trip level the ID MUST take into account overlapping fishing trip (attributing it to a unique vessel => "vessel_ID" in our case) / value: character, name of the categorical variable for which we want to obtain the diversity index / method: character, selection of the diversity index ("simpson" or "shannon") / abundance: character, name of the variable being used as a proxy of categories' abundance (e.g. number of fishing events, trip, weight, effort, etc.) / event: character, name of variable indicating fishing sequence/event ID / averaged: boolean, is the number of categories averaged between different levels ? / scale: character, if averaged==T, name of the variable indicating the different levels to consider, e.g. trip or sequence IDs / SD: boolean, if TRUE return the Standard deviation between the different level 
+    .ID=as.name(ID);
+    .value=as.name(value);
+    .abundance=as.name(abundance); #converting strings input in names
+    if (!averaged) {
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(abundance),   #removing NAs to avoid taking them into account for the count number
+                ifelse(!is.numeric(abundance), length( 
+                  unique(abundance)), ifelse(constant, sum(abundance[!duplicated(event)]), sum(abundance))),  #number of occurence or sum per ID
+                     by=.(ID,value)] [, ifelse(method=="simpson", diversity(V1, index="simpson"), diversity(V1, index="shannon")), #averaged/SD over ID
+                                          by=ID ], list(ID=.ID, value=.value, abundance=.abundance)))
+    }
+    else {
+      .scale=as.name(scale);
+      eval(
+        substitute(
+          SACROIS[!is.na(value) & !is.na(abundance),
+                    ifelse(!is.numeric(abundance), length( 
+                      unique(abundance)), ifelse(constant, sum(abundance[!duplicated(event)]), sum(abundance))), #number of occurence per scale unit
+                        by=.(ID,scale,value)] [, ifelse(method=="simpson", diversity(V1, index="simpson"), diversity(V1, index="shannon")), #averaged/SD over ID
+                                          by=.(ID,scale) ] [, ifelse(SD, pop.sd(V1), mean(V1)), #averaged/SD over ID
+                                          by=ID ], list(ID=.ID, value=.value, abundance=.abundance, scale=.scale)))
+    }
+  }
+  
+  
+  
+  
+  
+  
+  #main categories (+proportion, values of main categories):
+  
+
+  
+  
+    main_cat <- function(data, ID, value, rule, constant=FALSE, event, majority=FALSE, averaged=FALSE, scale=NULL) { # data: data.table format, analysed dataset / ID: character, name of the variable containing individual trip or vessel IDs - WARNING: when using the function with averaging at trip level the ID MUST take into account overlapping fishing trip (attributing it to a unique vessel => "vessel_ID" in our case) / value: character, name of the categorical variable for which we want to determine the main category / rule: character, name of the variable being used to determine categories' importance (e.g. number of fishing events, trip, weight, effort, economic value, etc.) / constant: boolean, is the rule variable value (only for quantitative ones) constant over a fishing sequence ? (e.g. fishing effort) / event: character, name of variable indicating fishing sequence/event ID / majority: boolean, is the rule used to determine categories' importance used at different levels, for which a majority rule is applied then ? (i.e., main category determined for each trip/sequence, final main category is the one appearing the most over all trips/sequences) / averaged: boolean, is the rule used to determine categories' importance averaged between different levels ? / scale: character, if majority==T or averaged==T, name of the variable indicating the different levels to consider, e.g. trip or sequence IDs
+    .ID=as.name(ID);
+    .value=as.name(value);
+    .event=as.name(event);
+    .rule=as.name(rule); #converting strings input in names
+    if (!averaged & !majority) {
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)][,   #removing NAs to avoid taking them into account for the count number 
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), length(unique(rule))),  #number of "rule" occurrence per ID for non-numeric variables (i.e. trip or sequence ID) / sum of "rule" values per ID for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID,value)] [, .(main=V1==max(V1), val=V1, prop=V1/sum(V1), value), #find maximal rule value per ID
+                                          by=ID ] [main==T] [!duplicated(ID), .(ID, value, val, prop)], list(ID=.ID, value=.value, rule=.rule, event=.event))) #retaining category with maximal value, in case of ex-aequo retains the first category entered in logbook (random ???) 
+    }
+    else if (averaged) {
+      .scale=as.name(scale);
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)][,   #removing NAs to avoid taking them into account for the count number 
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), length(unique(rule))),  #number of "rule" occurrence per ID+scale for non-numeric variables (i.e. sequence ID) / sum of "rule" values per ID+scale for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID, scale, value)] [, .(mean(V1), pop.sd(V1)), #mean of rule values per scale
+                                              by=.(ID,value)] [, .(main=V1==max(V1), val=V1, sd=V2, prop=V1/sum(V1), value), #find maximal rule value per ID
+                                              by=ID ] [main==T] [!duplicated(ID), .(ID,value, val, sd, prop)], list(ID=.ID, value=.value, rule=.rule, event=.event, scale=.scale))) #retaining category with maximal value, in case of ex-eaquo retains the first category entered in logbook (random ???) 
+    }
+    else if (majority) {
+      .scale=as.name(scale);
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)][,   #removing NAs to avoid taking them into account for the count number
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), length(unique(rule))),  #number of "rule" occurrence per ID+scale for non-numeric variables (i.e. sequence ID) / sum of "rule" values per ID+scale for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID, scale, value)] [, .(main=V1==max(V1), val=V1, prop=V1/sum(V1), value), #find maximal rule value per ID+scale
+                                              by=.(ID, scale) ] [main==T] [!duplicated(scale)] [, .(length(scale), val=mean(val), prop=mean(prop)), #number of scale for each scale-level main categories
+                                              by=.(ID,value)] [, .(V1==max(V1), val=weighted.mean(val, V1), sd=weighted.mean( (val-weighted.mean(val, V1))^2, V1 ), prop=weighted.mean(prop, V1), sd_prop=weighted.mean( (prop-weighted.mean(prop, V1))^2, V1 ), value), #find categories with the more scale representation
+                                          by=ID ] [V1==T] [!duplicated(ID), .(ID,value, val, sd, prop, sd_prop)] , list(ID=.ID, value=.value, rule=.rule, event=.event, scale=.scale))) #retaining category with maximal value, in case of ex-eaquo retains the first category entered in logbook (random ???) 
+      }    
+  }
+  
+    
+    
+    #WARNING: this function returns main categories AND their associated proportion and values. In the case of "averaged" or "majority" values and proportion it does not correspond to the mean/sd value/proportion of the determined main category, but respectively to the proportion of the mean value or the mean/sd value/proportion of each maximal value. Proportion and values for a unique category can be computed below 
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    #second/third categories (+proportion, values of such categories):
+    
+    
+    
+    
+    
+    secondary_cat <- function(data, ID, value, rule, first, second=NULL, constant=FALSE, event) { # data: data.table format, analysed dataset / ID: character, name of the variable containing individual trip or vessel IDs - WARNING: when using the function with averaging at trip level the ID MUST take into account overlapping fishing trip (attributing it to a unique vessel => "vessel_ID" in our case) / value: character, name of the categorical variable for which we want to determine the main category / rule: character, name of the variable being used to determine categories' importance (e.g. number of fishing events, trip, weight, effort, economic value, etc.) / first, second: data.table containing trip, vessel IDs along with main or second categories (importance being determined with the same rules) / constant: boolean, is the rule variable value (only for quantitative ones) constant over a fishing sequence ? (e.g. fishing effort) / event: character, name of variable indicating fishing sequence/event ID 
+    .ID=as.name(ID);
+    .value=as.name(value);
+    .event=as.name(event);
+    .rule=as.name(rule); #converting strings input in names
+    if (is.null(second)) {
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)] [first[,.(ID, main=value)], #removing NAs to avoid taking them into account for the count number / merging reference level with dataset
+                                      on= .(ID)] [value!=main,    
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), length(unique(rule))),  #number of "rule" occurrence per ID for non-numeric variables (i.e. trip or sequence ID) / sum of "rule" values per ID for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID,value)] [, .(main=V1==max(V1), val=V1, prop=V1/sum(V1), value), #find maximal rule value per ID
+                                          by=ID ] [main==T] [!duplicated(ID), .(ID, value, val, prop)], list(ID=.ID, value=.value, rule=.rule, event=.event))) #retaining category with maximal value, in case of ex-eaquo retains the first category entered in logbook (random ???) 
+    }
+    else {
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)] [first[,.(ID, main=value)], #removing NAs to avoid taking them into account for the count number / merging reference level with dataset
+                                      on= .(ID)] [second[,.(ID, second=value)], #removing NAs to avoid taking them into account for the count number / merging reference level with dataset
+                                      on= .(ID)] [value!=main & value!=second,    
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), length(unique(rule))),  #number of "rule" occurrence per ID for non-numeric variables (i.e. trip or sequence ID) / sum of "rule" values per ID for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID,value)] [, .(main=V1==max(V1), val=V1, prop=V1/sum(V1), value), #find maximal rule value per ID
+                                          by=ID ] [main==T] [!duplicated(ID), .(ID, value, val, prop)], list(ID=.ID, value=.value, rule=.rule, event=.event))) #retaining category with maximal value, in case of ex-eaquo retains the first category entered in logbook (random ???) 
+    }
+  }  
+  
+    
+    
+    
+    
+    
+    
+    
+  
+  
+  #proportion/values of categories:
+    
+  
+  
+  
+    cat_prop_val <- function(data, ID, value, rule, reference, constant=FALSE, event, averaged=FALSE, scale=NULL) { # data: data.table format, analysed dataset / ID: character, name of the variable containing individual trip or vessel IDs - WARNING: when using the function with averaging at trip level the ID MUST take into account overlapping fishing trip (attributing it to a unique vessel => "vessel_ID" in our case) / value: character, name of the categorical variable for which we want to determine the proportion/value of a reference category / rule: character, name of the variable being used to determine categories' weight (e.g. number of fishing events, trip, weight, effort, economic value, etc.) / reference: character or data.table, reference level of the categorical variable of interest, for which we compute the value / proportion relatively to all other levels. Can either be a unique reference value applied to all vessels, or a data.table with reference value indicated for vessel/trip ID / constant: boolean, is the rule variable value (only for quantitative ones) constant over a fishing sequence ? (e.g. fishing effort) / event: character, name of variable indicating fishing sequence/event ID / averaged: boolean, is the rule used to determine categories' importance averaged between different levels ? / scale: character, if averaged==T, name of the variable indicating the different levels to consider, e.g. trip or sequence IDs
+    .ID=as.name(ID);
+    .value=as.name(value);
+    .event=as.name(event);
+    .rule=as.name(rule); #converting strings input in names
+    if (is.character(reference)) {
+    if (!averaged) {
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)][,   #removing NAs to avoid taking them into account for the count number 
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), as.numeric(length(unique(rule)))),  #number of "rule" occurrence per ID for non-numeric variables (i.e. trip or sequence ID) / sum of "rule" values per ID for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID,value)] [, .(ifelse(reference %in% .SD$value, V1[.SD$value==reference], 0), sum(V1)), #compute rule value proportion in class of interest
+                                          by=ID ][,.(ID, val=V1, prop=V1/V2)], list(ID=.ID, value=.value, rule=.rule, event=.event))) 
+    }
+    else {
+      .scale=as.name(scale);
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)][,   #removing NAs to avoid taking them into account for the count number 
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), as.numeric(length(unique(rule)))),  #number of "rule" occurrence per ID for non-numeric variables (i.e. trip or sequence ID) / sum of "rule" values per ID for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID, scale, value)] [, .(ifelse(reference %in% .SD$value, V1[.SD$value==reference], 0), sum(V1)), #compute rule value proportion in class of interest at the scale level
+                                              by=.(ID,scale)] [, .(val=mean(V1), prop=mean(V1/V2)), #mean value per scale
+                                              by=ID ], list(ID=.ID, value=.value, rule=.rule, event=.event, scale=.scale))) #retaining category with maximal value, in case of ex-eaquo retains the first category entered in logbook (random ???) 
+    }
+    }  
+    else{
+      if (!averaged) {
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)][,   #removing NAs to avoid taking them into account for the count number 
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), as.numeric(length(unique(rule)))),  #number of "rule" occurrence per ID for non-numeric variables (i.e. trip or sequence ID) / sum of "rule" values per ID for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID,value)] [reference[,.(ID, main=value)], #merging reference level with dataset
+                                      on= .(ID)][, .(ifelse(.SD$main[1] %in% .SD$value, V1[.SD$value==.SD$main[1]], 0), sum(V1)),  #compute rule value proportion in class of interest
+                                          by=ID ][, .(ID, val=V1, prop=V1/V2)], list(ID=.ID, value=.value, rule=.rule, event=.event))) 
+    }
+    else {
+      .scale=as.name(scale);
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(rule)][,   #removing NAs to avoid taking them into account for the count number 
+                ifelse(is.numeric(rule), ifelse(constant, sum(rule[!duplicated(event)]), sum(rule)), as.numeric(length(unique(rule)))), #number of "rule" occurrence per ID for non-numeric variables (i.e. trip or sequence ID) / sum of "rule" values per ID for numeric variables (while selecting only one fishing sequence occurrence for rule values constant over fishing sequence)
+                     by=.(ID, scale, value)] [reference[,.(ID, main=value)], #merging reference level with dataset
+                                      on= .(ID)][, .(ifelse(.SD$main[1] %in% .SD$value, V1[.SD$value==.SD$main[1]], 0), sum(V1)), #compute rule value proportion in class of interest at the scale level
+                                              by=.(ID,scale)] [, .(val=mean(V1), sd=pop.sd(V1), prop=mean(V1/V2), sd_prop=pop.sd(V1/V2)), #mean value per scale
+                                              by=ID ], list(ID=.ID, value=.value, rule=.rule, event=.event, scale=.scale))) #retaining category with maximal value, in case of ex-eaquo retains the first category entered in logbook (random ???) 
+    }
+    }
+  }
+  
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+  
+  #quantitative value:
+  
+    
+    
+    
+    
+    
+  
+  
+    quant_values <- function(data, ID, value, constant=FALSE, event, averaged=FALSE, averaged2=FALSE, scale=NULL, scale2=NULL, SD=FALSE, SD2=FALSE, weighted=NULL) { # data: data.table format, analysed dataset / ID: character, name of the variable containing individual trip or vessel IDs - WARNING: when using the function with averaging at trip level the ID MUST take into account overlapping fishing trip (attributing it to a unique vessel => "vessel_ID" in our case) / value: numeric, name of the quantitative variable for which we want to determine the value/variation at different possible scale / constant: boolean, is the quantitative variable constant over a fishing sequence ? (e.g. fishing effort) / event: character, name of variable indicating fishing sequence/event ID / averaged, averaged2: booleans, is the rule used to determine categories' importance averaged between different levels ? (could be performed up to two different level at the same time) / scale, scale2: character, if averaged==T, name of the variable indicating the different levels to consider, e.g. trip, sequence IDs, taxa... / SD,SD2: booleans, if TRUE return the Standard deviation between the different level considered 
+    .ID=as.name(ID);
+    .value=as.name(value);
+    .event=as.name(event); #converting strings input in names
+    if (!averaged) {
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value)][if (constant) {!duplicated(event)} else {1:.N},   #removing NAs to avoid taking them into account / selecting only one fishing sequence occurrence for values constant over fishing sequence
+                sum(value),  #sum of values per ID
+                     by=ID], list(ID=.ID, value=.value, event=.event))) 
+    }
+    else if (!averaged2) {
+      .scale=as.name(scale);
+      if (is.null(weighted)) {
+        eval( #evaluating the string command below
+          substitute( #substituting strings by names
+            data[!is.na(value) & !is.na(scale)][,   #removing NAs to avoid taking them into account
+                  ifelse(constant, sum(value[!duplicated(event)]), sum(value)),  #sum of values per ID and scale (selecting only one fishing sequence occurrence for values constant over fishing sequence)
+                       by=.(ID, scale)] [, ifelse(SD, pop.sd(V1), mean(V1)), #averaging per scale
+                                         by=ID], list(ID=.ID, value=.value, event=.event, scale=.scale))) 
+      }
+      else { #only applicable for quantitative values with baseline level at the event scale and for averaging at the same event scale
+        .weighted=as.name(weighted);
+        eval( #evaluating the string command below
+          substitute( #substituting strings by names
+            data[!is.na(value) & !is.na(weighted)][,   #removing NAs to avoid taking them into account
+                  .(value[!duplicated(event)], ifelse(constant, sum(value[!duplicated(event)]), sum(value))),  #sum of values per ID and scale (selecting only one fishing sequence occurrence for values constant over fishing sequence)
+                       by=.(ID, scale)] [, ifelse(SD, weighted.mean( (V1-weighted.mean(V1, V2))^2, V2 ), weighted.mean(V1, V2)), #averaging per scale
+                                         by=ID], list(ID=.ID, value=.value, event=.event, scale=.scale, weighted=.weighted))) 
+      }
+    }  
+    else {
+      .scale=as.name(scale);
+      .scale2=as.name(scale2);
+      eval( #evaluating the string command below
+        substitute( #substituting strings by names
+          data[!is.na(value) & !is.na(scale)][,   #removing NAs to avoid taking them into account 
+                ifelse(constant, sum(value[!duplicated(event)]), sum(value)),  #sum of values per ID and scale (selecting only one fishing sequence occurrence for values constant over fishing sequence)
+                     by=.(ID, scale, scale2)] [, ifelse(SD, pop.sd(V1), mean(V1)), #averaging per first scale
+                                       by=.(ID, scale)] [, ifelse(SD2, pop.sd(V1), mean(V1)), #averaging per second scale
+                                       by=ID], list(ID=.ID, value=.value, event=.event, scale=.scale, scale2=.scale2))) 
+    }
+  }
+  
+    
+    
+    
+    
+    
+    
+    
+  
+  
+
+```
+
+
+
+
+#Fishing behaviors at fishing trip scale
+
+
+
+Réaliser classification tactique UNIQUEMENT pour chaque stratégie identifiée comme particlièrement à risque !
+
+
+
+
+```{r fishing behaviour - trip scale}
+
+
+  #table de relation noms variables-noms clés:
+
+  nomenclature=data.table(var=c("MAREE_ID", "LIEU_COD_DEP_SACROIS", "LIEU_COD_RET_SACROIS", "TPS_MER", "SEQ_ID", "ENGIN_COD",  "MAILLAGE", "DIMENSION", "SECT_COD_SACROIS_NIV3", "SECT_COD_SACROIS_NIV5", "SECT_COD_SACROIS_NIV6", "GRADIENT_COD", "ZEE_COD",  "TP_NAVIRE_SACROIS", "ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO",  "STOCK_ORGP",  "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO", "DATE_SEQ_DAY", "MONTH", "TRIMESTRE"), keys=c("effort_fishing_trip", "spat_dep_port", "spat_ret_port", "effort_sea_time", "effort_fishing_sequence", "gear_type", "gear_mesh_size", "gear_dimension", "spat_ICES_divis", "spat_stat_rect", "spat_stat_subrect", "spat_gradient", "spat_zee", "effort_fishing_time", "tax_spe", "tax_spp", "tax_family", "tax_order", "tax_isscaap", "tax_stock", "weight", "eco", "weight.prod", "eco.prod", "temp_day", "temp_month", "temp_trimester"))
+
+
+
+
+
+
+
+
+  
+  
+
+data_trip=unique(SACROIS[,.(MAREE_ID)])
+
+
+  
+  
+
+  
+  
+  #WARNING: trip and sequence/event ID must be in character/factor format !
+  
+  
+  SACROIS[, MAREE_ID:=as.character((MAREE_ID))]
+  SACROIS[, SEQ_ID:=as.character((SEQ_ID))]
+  
+    SACROIS[, ESP2_COD_FAO:=as.character((ESP2_COD_FAO))]
+  SACROIS[, SPP_COD_FAO:=as.character((SPP_COD_FAO))]
+      SACROIS[, FAMILY_COD_FAO:=as.character((FAMILY_COD_FAO))]
+  SACROIS[, ORDER_COD_FAO:=as.character((ORDER_COD_FAO))]
+    SACROIS[, ISSCAAP_COD_FAO:=as.character((ISSCAAP_COD_FAO))]
+
+
+
+
+
+
+
+
+
+
+###### Diversity metrics
+
+
+
+ 
+### richness
+
+
+  for (i in c("SEQ_ID", "DATE_SEQ_DAY", "ENGIN_COD",  "MAILLAGE", "DIMENSION", "SECT_COD_SACROIS_NIV3", "SECT_COD_SACROIS_NIV5", "SECT_COD_SACROIS_NIV6", "GRADIENT_COD", "ZEE_COD", "ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO", "STOCK_ORGP")) {
+    number_cats= number_cat(SACROIS, "MAREE_ID", i);
+    data_trip=merge(data_trip, number_cats, all=T);
+    setnames(data_trip, "V1", paste("div_nb_val", nomenclature[var==i, keys], "trip", sep="_"))
+  }
+
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+    number_cats= number_cat(SACROIS, "MAREE_ID", i, averaged = T, scale = "SEQ_ID");
+    data_trip=merge(data_trip, number_cats, all=T);
+    setnames(data_trip, "V1", paste("div_nb_val", nomenclature[var==i, keys], "average_seq", sep="_"))
+  }
+
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+    number_cats= number_cat(SACROIS, "MAREE_ID", i, averaged = T, scale = "SEQ_ID", SD=T);
+    data_trip=merge(data_trip, number_cats, all=T);
+    setnames(data_trip, "V1", paste("div_nb", nomenclature[var==i, keys], "sde_seq", sep="_"))
+  }
+
+
+
+
+### simpson
+
+
+
+  for (i in c("ENGIN_COD",  "MAILLAGE", "DIMENSION", "SECT_COD_SACROIS_NIV3", "SECT_COD_SACROIS_NIV5", "SECT_COD_SACROIS_NIV6", "GRADIENT_COD", "ZEE_COD", "ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO", "STOCK_ORGP")) {
+    for (j in c("SEQ_ID", "QUANT_POIDS_VIF_SACROIS", "TP_NAVIRE_SACROIS")) {
+      div_cats= div_index(SACROIS, "MAREE_ID", i, abundance=j, constant = ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID");
+      data_trip=merge(data_trip, div_cats, all=T);
+      setnames(data_trip, "V1", paste("div_simpson_val", nomenclature[var==i, keys], nomenclature[var==j, keys], "trip", sep="_"))
+      }
+    }
+
+
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+      div_cats= div_index(SACROIS, "MAREE_ID", i, abundance="QUANT_POIDS_VIF_SACROIS", constant = F, event="SEQ_ID", averaged = T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, div_cats, all=T);
+      setnames(data_trip, "V1", paste("div_simpson_val", nomenclature[var==i, keys], "weight", "average_seq", sep="_"))
+  }
+
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+      div_cats= div_index(SACROIS, "MAREE_ID", i, abundance="QUANT_POIDS_VIF_SACROIS", constant = F, event="SEQ_ID", averaged = T, scale = "SEQ_ID", SD=T);
+      data_trip=merge(data_trip, div_cats, all=T);
+      setnames(data_trip, "V1", paste("div_simpson", nomenclature[var==i, keys], "weight", "sde_seq", sep="_"))
+    }
+
+
+
+### shannon
+
+
+ for (i in c("ENGIN_COD",  "MAILLAGE", "DIMENSION", "SECT_COD_SACROIS_NIV3", "SECT_COD_SACROIS_NIV5", "SECT_COD_SACROIS_NIV6", "GRADIENT_COD", "ZEE_COD", "ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO", "STOCK_ORGP")) {
+    for (j in c("SEQ_ID", "QUANT_POIDS_VIF_SACROIS", "TP_NAVIRE_SACROIS")) {
+      div_cats= div_index(SACROIS, "MAREE_ID", i, abundance=j, constant = ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", method = "shannon");
+      data_trip=merge(data_trip, div_cats, all=T);
+      setnames(data_trip, "V1", paste("div_shannon_val", nomenclature[var==i, keys], nomenclature[var==j, keys], "trip", sep="_"))
+      }
+    }
+
+
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+      div_cats= div_index(SACROIS, "MAREE_ID", i, abundance="QUANT_POIDS_VIF_SACROIS", constant = F, event="SEQ_ID", averaged = T, scale = "SEQ_ID", method = "shannon");
+      data_trip=merge(data_trip, div_cats, all=T);
+      setnames(data_trip, "V1", paste("div_shannon_val", nomenclature[var==i, keys], "weight", "average_seq", sep="_"))
+  }
+
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+      div_cats= div_index(SACROIS, "MAREE_ID", i, abundance="QUANT_POIDS_VIF_SACROIS", constant = F, event="SEQ_ID", averaged = T, scale = "SEQ_ID", SD=T, method = "shannon");
+      data_trip=merge(data_trip, div_cats, all=T);
+      setnames(data_trip, "V1", paste("div_shannon", nomenclature[var==i, keys], "weight", "sde_seq", sep="_"))
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###### Main categories
+
+
+
+
+  for (i in c("MONTH", "TRIMESTRE", "ENGIN_COD",  "MAILLAGE", "DIMENSION", "SECT_COD_SACROIS_NIV3", "SECT_COD_SACROIS_NIV5", "SECT_COD_SACROIS_NIV6", "GRADIENT_COD", "ZEE_COD", "ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO", "STOCK_ORGP")) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= main_cat(SACROIS, "MAREE_ID", i, j, ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, i, paste("main", nomenclature[var==i, keys], nomenclature[var==j, keys], "trip", sep="_"));
+      setnames(data_trip, "val", paste("main_value", nomenclature[var==i, keys], nomenclature[var==j, keys], "trip", sep="_"));
+      setnames(data_trip, "prop", paste("main_prop", nomenclature[var==i, keys], nomenclature[var==j, keys], "trip", sep="_"))
+    }
+  }  
+
+
+
+
+
+  for (i in c("MONTH", "TRIMESTRE", "ENGIN_COD",  "MAILLAGE", "DIMENSION", "SECT_COD_SACROIS_NIV3", "SECT_COD_SACROIS_NIV5", "SECT_COD_SACROIS_NIV6", "GRADIENT_COD", "ZEE_COD", "ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO", "STOCK_ORGP")) {
+    for (j in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= main_cat(SACROIS, "MAREE_ID", i, j, ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, i, paste("main", nomenclature[var==i, keys], nomenclature[var==j, keys], "average_seq", sep="_"));
+      setnames(data_trip, "val", paste("main_value", nomenclature[var==i, keys], nomenclature[var==j, keys], "average_seq", sep="_"));
+      setnames(data_trip, "prop", paste("main_prop", nomenclature[var==i, keys], nomenclature[var==j, keys], "average_seq", sep="_"));
+      setnames(data_trip, "sd", paste("main_val", nomenclature[var==i, keys], nomenclature[var==j, keys], "sd_seq", sep="_"))
+    }
+  }  
+
+
+
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+    for (j in c("QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS")) { 
+      main_cats= main_cat(SACROIS, "MAREE_ID", i, j, event="SEQ_ID", majority=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, i, paste("main", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"));
+      setnames(data_trip, "val", paste("main_value", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"));
+      setnames(data_trip, "prop", paste("main_prop", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"));
+      setnames(data_trip, "sd", paste("main_val_sd", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"));
+      setnames(data_trip, "sd_prop", paste("main_propor_sde", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"))
+    }
+  }  
+
+
+
+
+
+
+#two subsequent blocks useful ? (computing mean/sd proportion/value only for main categories found by majority or average computation)
+
+  for (i in c("MONTH", "TRIMESTRE", "ENGIN_COD",  "MAILLAGE", "DIMENSION", "SECT_COD_SACROIS_NIV3", "SECT_COD_SACROIS_NIV5", "SECT_COD_SACROIS_NIV6", "GRADIENT_COD", "ZEE_COD", "ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO", "STOCK_ORGP")) {
+    for (j in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", i, j, reference=data_trip[,.(MAREE_ID, eval(as.name(paste("main", nomenclature[var==i, keys], nomenclature[var==j, keys], "average_seq", sep="_"))))][,(i):=V2], constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats[,.(MAREE_ID, prop, sd_prop)], all=T);
+      setnames(data_trip, "prop", paste("main_true_prop", nomenclature[var==i, keys], nomenclature[var==j, keys], "average_seq", sep="_"));
+      setnames(data_trip, "sd_prop", paste("main_propor_sde", nomenclature[var==i, keys], nomenclature[var==j, keys], "average_seq", sep="_"))
+    }
+  }  
+
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+    for (j in c("QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", i, j, reference=data_trip[,.(MAREE_ID, eval(as.name(paste("main", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"))))][,(i):=V2], constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("main_true_value", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"));
+      setnames(data_trip, "prop", paste("main_true_prop", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"));
+      setnames(data_trip, "sd", paste("main_true_val_sd", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"));
+      setnames(data_trip, "sd_prop", paste("main_true_propor_sde", nomenclature[var==i, keys], nomenclature[var==j, keys], "majority_seq", sep="_"))
+    }
+  }  
+
+
+
+
+
+
+
+
+
+###### proportion and values of categories frequently associated with each others:
+
+
+
+
+
+### Species
+
+
+
+basket=tapply(SACROIS$ESP2_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE) #WARNING: to be runned only for the subset of interest (way too heavy otherwise !!!!)
+
+names(basket)=NULL
+
+basket=list(basket)
+
+basket=unlist(basket, recursive = F)
+
+names(basket)=names(tapply(SACROIS$ESP2_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE))
+
+#creation of a "basket" of species (all species captured at least once for each vessels)
+
+
+
+trans <- as(basket, "transactions") #transaction class for association rule modelling
+
+
+rules_chi2 <- apriori(trans, parameter = list(supp = 0.1, conf = 0.8,minlen=2,maxlen=2, arem = "chi2"))
+
+#secondary selection of selection statistically supported by chi-squared tests
+#support: probability threshold of the combination on the whole dataset => set on default parameter
+#conf: probability threshold for the association (A knowing B)  => set on default parameter
+
+
+target_species=union(as.vector(unique(inspect(rules_chi2)$lhs)),as.vector(unique(inspect(rules_chi2)$rhs)))
+#all species implied in a relevant association
+
+
+target_species= str_extract(target_species, pattern="(?<=\\{)(.*)(?=\\})" )
+
+
+
+
+
+remove(list=c("basket", "rules_chi2","trans")) # removes elements without any more use, to avoid memory overload
+gc()
+
+
+
+
+
+
+  for (i in target_species) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "ESP2_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=F);
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("SPE", nomenclature[var==j, keys], i, sep="_"));
+      setnames(data_trip, "prop", paste("SPE_prop", nomenclature[var==j, keys], i, sep="_"))
+    }
+  } 
+
+
+
+
+  for (i in target_species) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "ESP2_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("SPE", nomenclature[var==j, keys], i, "average_seq", sep="_"));
+      setnames(data_trip, "prop", paste("SPE_prop", nomenclature[var==j, keys], i, "average_seq", sep="_"))
+    }
+  } 
+
+
+
+
+
+
+
+### Group of species
+
+
+
+
+
+basket=tapply(SACROIS$SPP_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE) #WARNING: to be runned only for the subset of interest (way too heavy otherwise !!!!)
+
+names(basket)=NULL
+
+basket=list(basket)
+
+basket=unlist(basket, recursive = F)
+
+names(basket)=names(tapply(SACROIS$SPP_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE))
+
+#creation of a "basket" of species (all species captured at least once for each vessels)
+
+
+
+trans <- as(basket, "transactions") #transaction class for association rule modelling
+
+
+rules_chi2 <- apriori(trans, parameter = list(supp = 0.1, conf = 0.8,minlen=2,maxlen=2, arem = "chi2"))
+
+#secondary selection of selection statistically supported by chi-squared tests
+#support: probability threshold of the combination on the whole dataset => set on default parameter
+#conf: probability threshold for the association (A knowing B)  => set on default parameter
+
+
+target_spp=union(as.vector(unique(inspect(rules_chi2)$lhs)),as.vector(unique(inspect(rules_chi2)$rhs)))
+#all species implied in a relevant association
+
+
+target_spp= str_extract(target_spp, pattern="(?<=\\{)(.*)(?=\\})" )
+
+
+
+
+
+remove(list=c("basket", "rules_chi2","trans")) # removes elements without any more use, to avoid memory overload
+gc()
+
+
+
+
+
+
+  for (i in target_spp) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "SPP_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=F);
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("SPP", nomenclature[var==j, keys], i, sep="_"));
+      setnames(data_trip, "prop", paste("SPP_prop", nomenclature[var==j, keys], i, sep="_"))
+    }
+  } 
+
+
+
+
+  for (i in target_spp) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "SPP_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("SPP", nomenclature[var==j, keys], i, "average_seq", sep="_"));
+      setnames(data_trip, "prop", paste("SPP_prop", nomenclature[var==j, keys], i, "average_seq", sep="_"))
+    }
+  } 
+
+
+
+
+
+
+
+
+
+### Family
+
+
+
+
+
+
+
+
+basket=tapply(SACROIS$FAMILY_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE) #WARNING: to be runned only for the subset of interest (way too heavy otherwise !!!!)
+
+names(basket)=NULL
+
+basket=list(basket)
+
+basket=unlist(basket, recursive = F)
+
+names(basket)=names(tapply(SACROIS$FAMILY_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE))
+
+#creation of a "basket" of species (all species captured at least once for each vessels)
+
+
+
+trans <- as(basket, "transactions") #transaction class for association rule modelling
+
+
+rules_chi2 <- apriori(trans, parameter = list(supp = 0.1, conf = 0.8,minlen=2,maxlen=2, arem = "chi2"))
+
+#secondary selection of selection statistically supported by chi-squared tests
+#support: probability threshold of the combination on the whole dataset => set on default parameter
+#conf: probability threshold for the association (A knowing B)  => set on default parameter
+
+
+target_family=union(as.vector(unique(inspect(rules_chi2)$lhs)),as.vector(unique(inspect(rules_chi2)$rhs)))
+#all species implied in a relevant association
+
+
+target_family= str_extract(target_family, pattern="(?<=\\{)(.*)(?=\\})" )
+
+
+
+
+
+remove(list=c("basket", "rules_chi2","trans")) # removes elements without any more use, to avoid memory overload
+gc()
+
+
+
+
+
+
+  for (i in target_family) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "FAMILY_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=F);
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("FAMILY", nomenclature[var==j, keys], i, sep="_"));
+      setnames(data_trip, "prop", paste("FAMILY_prop", nomenclature[var==j, keys], i, sep="_"))
+    }
+  } 
+
+
+
+
+  for (i in target_family) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "FAMILY_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("FAMILY", nomenclature[var==j, keys], i, "average_seq", sep="_"));
+      setnames(data_trip, "prop", paste("FAMILY_prop", nomenclature[var==j, keys], i, "average_seq", sep="_"))
+    }
+  } 
+
+
+
+
+
+
+
+
+
+
+
+### Order
+
+
+
+
+
+
+
+
+basket=tapply(SACROIS$ORDER_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE) #WARNING: to be runned only for the subset of interest (way too heavy otherwise !!!!)
+
+names(basket)=NULL
+
+basket=list(basket)
+
+basket=unlist(basket, recursive = F)
+
+names(basket)=names(tapply(SACROIS$ORDER_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE))
+
+#creation of a "basket" of species (all species captured at least once for each vessels)
+
+
+
+trans <- as(basket, "transactions") #transaction class for association rule modelling
+
+
+rules_chi2 <- apriori(trans, parameter = list(supp = 0.1, conf = 0.8,minlen=2,maxlen=2, arem = "chi2"))
+
+#secondary selection of selection statistically supported by chi-squared tests
+#support: probability threshold of the combination on the whole dataset => set on default parameter
+#conf: probability threshold for the association (A knowing B)  => set on default parameter
+
+
+target_order=union(as.vector(unique(inspect(rules_chi2)$lhs)),as.vector(unique(inspect(rules_chi2)$rhs)))
+#all species implied in a relevant association
+
+
+target_order= str_extract(target_order, pattern="(?<=\\{)(.*)(?=\\})" )
+
+
+
+
+
+remove(list=c("basket", "rules_chi2","trans")) # removes elements without any more use, to avoid memory overload
+gc()
+
+
+
+
+
+
+  for (i in target_order) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "ORDER_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=F);
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("ORDER", nomenclature[var==j, keys], i, sep="_"));
+      setnames(data_trip, "prop", paste("ORDER_prop", nomenclature[var==j, keys], i, sep="_"))
+    }
+  } 
+
+
+
+
+  for (i in target_order) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "ORDER_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("ORDER", nomenclature[var==j, keys], i, "average_seq", sep="_"));
+      setnames(data_trip, "prop", paste("ORDER_prop", nomenclature[var==j, keys], i, "average_seq", sep="_"))
+    }
+  } 
+
+
+
+
+
+
+
+
+
+
+
+### ISSCAAP
+
+
+
+
+
+
+
+
+basket=tapply(SACROIS$ISSCAAP_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE) #WARNING: to be runned only for the subset of interest (way too heavy otherwise !!!!)
+
+names(basket)=NULL
+
+basket=list(basket)
+
+basket=unlist(basket, recursive = F)
+
+names(basket)=names(tapply(SACROIS$ISSCAAP_COD_FAO, SACROIS$MAREE_ID, unique, simplify = FALSE))
+
+#creation of a "basket" of species (all species captured at least once for each vessels)
+
+
+
+trans <- as(basket, "transactions") #transaction class for association rule modelling
+
+
+rules_chi2 <- apriori(trans, parameter = list(supp = 0.1, conf = 0.8,minlen=2,maxlen=2, arem = "chi2"))
+
+#secondary selection of selection statistically supported by chi-squared tests
+#support: probability threshold of the combination on the whole dataset => set on default parameter
+#conf: probability threshold for the association (A knowing B)  => set on default parameter
+
+
+target_isscaap=union(as.vector(unique(inspect(rules_chi2)$lhs)),as.vector(unique(inspect(rules_chi2)$rhs)))
+#all species implied in a relevant association
+
+
+target_isscaap= str_extract(target_isscaap, pattern="(?<=\\{)(.*)(?=\\})" )
+
+
+
+
+
+remove(list=c("basket", "rules_chi2","trans")) # removes elements without any more use, to avoid memory overload
+gc()
+
+
+
+
+
+
+  for (i in target_isscaap) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "ISSCAAP_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=F);
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("ISSCAAP", nomenclature[var==j, keys], i, sep="_"));
+      setnames(data_trip, "prop", paste("ISSCAAP_prop", nomenclature[var==j, keys], i, sep="_"))
+    }
+  } 
+
+
+
+
+  for (i in target_isscaap) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      main_cats= cat_prop_val(SACROIS, "MAREE_ID", "ISSCAAP_COD_FAO", j, reference=i, constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged=T, scale = "SEQ_ID");
+      data_trip=merge(data_trip, main_cats, all=T);
+      setnames(data_trip, "val", paste("ISSCAAP", nomenclature[var==j, keys], i, "average_seq", sep="_"));
+      setnames(data_trip, "prop", paste("ISSCAAP_prop", nomenclature[var==j, keys], i, "average_seq", sep="_"))
+    }
+  } 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###### Secondary categories of importance (sufficient variability ??? To be checked !!!!)
+
+
+
+
+#in 2021 only 3% of fishing trips were associated to the use of more than one gear... (too low to consider secondary engine, but to be checked in the subset of strategies finally retained)
+
+
+#in 2021, more than 68% of fishing trip were associated to capture of more than one species and 58% to capture of more than two species ==> secondary levels to be considered !
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      second_cats= secondary_cat(SACROIS, "MAREE_ID", i, j, first=data_trip[,.(MAREE_ID, eval(as.name(paste("main", nomenclature[var==i, keys], nomenclature[var==j, keys], "trip", sep="_"))))][,(i):=V2], constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID");
+      data_trip=merge(data_trip, second_cats, all=T);
+      setnames(data_trip, i, paste("second", nomenclature[var==i, keys], nomenclature[var==j, keys], sep="_"));
+      setnames(data_trip, "val", paste("second_value", nomenclature[var==i, keys], nomenclature[var==j, keys], sep="_"));
+      setnames(data_trip, "prop", paste("second_prop", nomenclature[var==i, keys], nomenclature[var==j, keys], sep="_"))
+    }
+  } 
+
+
+
+  for (i in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO")) {
+    for (j in c("SEQ_ID", "TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) { 
+      third_cats= secondary_cat(SACROIS, "MAREE_ID", i, j, first=data_trip[,.(MAREE_ID, eval(as.name(paste("main", nomenclature[var==i, keys], nomenclature[var==j, keys], "trip", sep="_"))))][,(i):=V2], second=data_trip[,.(MAREE_ID, eval(as.name(paste("second", nomenclature[var==i, keys], nomenclature[var==j, keys], sep="_"))))][,(i):=V2], constant=ifelse(j=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID");
+      data_trip=merge(data_trip, third_cats, all=T);
+      setnames(data_trip, i, paste("third", nomenclature[var==i, keys], nomenclature[var==j, keys], sep="_"));
+      setnames(data_trip, "val", paste("third_value", nomenclature[var==i, keys], nomenclature[var==j, keys], sep="_"));
+      setnames(data_trip, "prop", paste("third_prop", nomenclature[var==i, keys], nomenclature[var==j, keys], sep="_"))
+    }
+  } 
+
+
+
+
+
+
+
+
+
+
+###### Quantitative value
+
+
+
+SACROIS[,MAILLAGE:=as.numeric(MAILLAGE)]
+
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) {
+    quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID");
+    data_trip=merge(data_trip, quantity, all=T);
+    setnames(data_trip, "V1", paste("value", nomenclature[var==i, keys], "trip", sep="_"))
+  }
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO", "MAILLAGE", "DATE_SEQ_DAY", "MONTH", "TRIMESTRE")) {
+    quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i %in% c("TP_NAVIRE_SACROIS", "MAILLAGE", "DATE_SEQ_DAY", "MONTH", "TRIMESTRE"), T, F), event="SEQ_ID", averaged = T, scale = "SEQ_ID");
+    data_trip=merge(data_trip, quantity, all=T);
+    setnames(data_trip, "V1", paste("value", nomenclature[var==i, keys], "average_seq", sep="_"))
+  }  
+
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO", "MAILLAGE", "DATE_SEQ_DAY", "MONTH", "TRIMESTRE")) {
+    quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i %in% c("TP_NAVIRE_SACROIS", "MAILLAGE", "DATE_SEQ_DAY", "MONTH", "TRIMESTRE"), T, F), event="SEQ_ID", averaged = T, scale = "SEQ_ID", SD=T);
+    data_trip=merge(data_trip, quantity, all=T);
+    setnames(data_trip, "V1", paste("sd", nomenclature[var==i, keys], "average_seq", sep="_"))
+  }  
+
+
+
+
+
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) {
+    for (j in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO","STOCK_ORGP", "ENGIN_COD")) {
+      quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged = T, scale = j);
+      data_trip=merge(data_trip, quantity, all=T);
+      setnames(data_trip, "V1", paste("value", nomenclature[var==i, keys], "mean", nomenclature[var==j, keys], sep="_"))
+    }  
+  }  
+
+
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) {
+    for (j in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO","STOCK_ORGP", "ENGIN_COD")) {
+      quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged = T, scale = j, SD=T);
+      data_trip=merge(data_trip, quantity, all=T);
+      setnames(data_trip, "V1", paste("sd", nomenclature[var==i, keys], "mean", nomenclature[var==j, keys], sep="_"))
+    }  
+  }  
+
+
+
+
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) {
+    for (j in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO","STOCK_ORGP", "ENGIN_COD")) {
+      quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged = T, scale = "SEQ_ID", averaged2 = T, scale2=j);
+      data_trip=merge(data_trip, quantity, all=T);
+      setnames(data_trip, "V1", paste("value", nomenclature[var==i, keys], "mean", nomenclature[var==j, keys], "average_seq", sep="_"))
+    }  
+  }  
+
+
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) {
+    for (j in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO","STOCK_ORGP", "ENGIN_COD")) {
+      quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged = T, scale = "SEQ_ID", averaged2 = T, scale2=j, SD=T);
+      data_trip=merge(data_trip, quantity, all=T);
+      setnames(data_trip, "V1", paste("sd", nomenclature[var==i, keys], "mean", nomenclature[var==j, keys], "average_seq", sep="_"))
+    }  
+  }  
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) {
+    for (j in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO","STOCK_ORGP", "ENGIN_COD")) {
+      quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged = T, scale = "SEQ_ID", averaged2 = T, scale2=j, SD2=T);
+      data_trip=merge(data_trip, quantity, all=T);
+      setnames(data_trip, "V1", paste("val", nomenclature[var==i, keys], "sd", nomenclature[var==j, keys], "average_seq", sep="_"))
+    }  
+  }  
+
+
+
+  for (i in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO")) {
+    for (j in c("ESP2_COD_FAO", "SPP_COD_FAO", "FAMILY_COD_FAO", "ORDER_COD_FAO", "ISSCAAP_COD_FAO","STOCK_ORGP", "ENGIN_COD")) {
+      quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged = T, scale = "SEQ_ID", averaged2 = T, scale2=j, SD=T, SD2=T);
+      data_trip=merge(data_trip, quantity, all=T);
+      setnames(data_trip, "V1", paste("sd", nomenclature[var==i, keys], "sd", nomenclature[var==j, keys], "average_seq", sep="_"))
+    }  
+  }  
+
+
+
+
+
+
+
+
+
+  for (i in c("MAILLAGE", "DATE_SEQ_DAY", "MONTH", "TRIMESTRE")) {
+    for (j in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO"))
+      quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged = T, scale = "SEQ_ID", weighted = j);
+      data_trip=merge(data_trip, quantity, all=T);
+      setnames(data_trip, "V1", paste("value", nomenclature[var==i, keys], "weighted", nomenclature[var==j, keys], "average_seq", sep="_"))
+  }  
+
+
+
+
+
+
+  for (i in c("MAILLAGE", "DATE_SEQ_DAY", "MONTH", "TRIMESTRE")) {
+    for (j in c("TP_NAVIRE_SACROIS", "QUANT_POIDS_VIF_SACROIS", "MONTANT_EUROS_SACROIS", "PROD_POIDS", "PROD_ECO"))
+      quantity= quant_values(SACROIS, "MAREE_ID", i, constant=ifelse(i=="TP_NAVIRE_SACROIS", T, F), event="SEQ_ID", averaged = T, scale = "SEQ_ID", SD=T, weighted = j);
+      data_trip=merge(data_trip, quantity, all=T);
+      setnames(data_trip, "V1", paste("sd", nomenclature[var==i, keys], "weighted", nomenclature[var==j, keys], "average_seq", sep="_"))
+  }  
+
+
+
+
+
+ rm(list=c("number_cats", "div_cats","main_cats", "number_cats", "second_cats", "third_cats", "quantity"))
+gc()
+
+```
+
+
+
+
+#Fishing tactics
+
+
+
+```{r fishing tactics}
+
+
+
+#### for highest risk strategies (>70% of bycatch event)
+
+
+#For sub-sub-fleet 58.3.3:
+
+
+
+
+data_trip_58.3.3=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="58.3.3", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_58.3.3=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="58.3.3", NAVS_COD_YEAR],]
+
+
+
+
+
+#For sub-sub-fleet 71.1.2:
+
+
+
+
+data_trip_71.1.2=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="71.1.2", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_71.1.2=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="71.1.2", NAVS_COD_YEAR],]
+
+
+
+
+
+#For sub-sub-fleet 65.2.1:
+
+
+
+
+data_trip_65.2.1=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="65.2.1", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_65.2.1=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="65.2.1", NAVS_COD_YEAR],]
+
+
+
+
+
+#For sub-sub-fleet 58.2.2:
+
+
+
+
+data_trip_58.2.2=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="58.2.2", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_58.2.2=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="58.2.2", NAVS_COD_YEAR],]
+
+
+
+
+
+
+#For sub-sub-fleet 65.2.2:
+
+
+
+
+data_trip_65.2.2=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="65.2.2", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_65.2.2=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="65.2.2", NAVS_COD_YEAR],]
+
+
+
+
+
+
+
+
+
+#### "strange" strategies (evnt of bycatch while main strategy seems at low risk):
+
+
+#For sub-sub-fleet 42.2.2:
+
+
+
+
+data_trip_42.2.2=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="42.2.2", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_42.2.2=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Flottille_cluster_number=="42.2.2", NAVS_COD_YEAR],]
+
+
+
+
+
+
+#For sub-sub-sub-sub-fleet 77.1.1.1.2: (increasing level of precision necessary to avoid heavy computation costs)
+
+
+
+
+data_trip_77.1.1.1.2=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Sous_Flottille_cluster_number=="77.1.1.1.2", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_77.1.1.1.2=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Sous_Flottille_cluster_number=="77.1.1.1.2", NAVS_COD_YEAR],]
+
+
+
+
+#For sub-sub-sub-sub-fleet 77.1.2.2.2: (increasing level of precision necessary to avoid heavy computation costs)
+
+
+
+
+data_trip_77.1.2.2.2=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Sous_Flottille_cluster_number=="77.1.2.2.2", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_77.1.2.2.2=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Sous_Flottille_cluster_number=="77.1.2.2.2", NAVS_COD_YEAR],]
+
+
+
+
+
+
+
+
+
+
+
+
+
+### for strategy with secondary risk (65.1.2 / 59 / 71.1.2, 71.1.1):
+
+
+
+
+
+#For sub-sub-sub-fleet 65.1.2.2: (increasing level of precision necessary to avoid heavy computation costs)
+
+
+
+
+data_trip_65.1.2.2=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Flottille_cluster_number=="65.1.2.2", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_65.1.2.2=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Flottille_cluster_number=="65.1.2.2", NAVS_COD_YEAR],]
+
+
+
+
+#For sub-sub-sub-fleet 65.1.2.3: (increasing level of precision necessary to avoid heavy computation costs)
+
+
+
+
+data_trip_65.1.2.3=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Flottille_cluster_number=="65.1.2.3", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_65.1.2.3=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Flottille_cluster_number=="65.1.2.3", NAVS_COD_YEAR],]
+
+
+
+
+#For sub-sub-sub-fleet 65.1.2.4: (increasing level of precision necessary to avoid heavy computation costs)
+
+
+
+
+data_trip_65.1.2.4=unique(SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Flottille_cluster_number=="65.1.2.4", NAVS_COD_YEAR], .(MAREE_ID)])
+
+SACROIS_65.1.2.4=SACROIS[NAVS_COD_YEAR %in% data_vessel[Sous_Sous_Sous_Flottille_cluster_number=="65.1.2.4", NAVS_COD_YEAR],]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Strategies with intermediate risks (5 to 10 bycatch events: 41, 47, 74, 60)
+
+
+
+
+
+
+#low-risk strategies with rare events (<5: 37, 64, 72, 86, also includes 42 and 77)
+
+
+
+```
+
+
+

@@ -1,0 +1,898 @@
+---
+title: "Classification_trip_tactics"
+format: html
+author: "Mathieu Brevet"
+execute:
+  echo: false
+  warning=: false
+---
+
+
+
+
+
+```{r loading used packages and functions}
+#| echo: false
+#| warning: false
+
+
+# Coded on R version 4.3.1 ("Beagle Scouts"), Rstudio version "Mountain Hydrangea" (2023.06.0)
+
+
+library(stringr) # string processing package
+
+library(dplyr)
+library(data.table) #more efficient management of large data sets
+
+library(microbenchmark) # assess efficiency of codes (in system time)
+
+library(FactoMineR) 
+library(factoextra) # used for multivariate analyses, hierarchical classification
+
+library(PCAmixdata)#another package to perform Factor Analysis of Mixed Data (pros: loadings accessible, cons: poor graphical outputs)
+
+
+library(corrplot) #visualisation of correlation matrix
+
+library(RVAideMemoire) #used for post-hoc tests in exploratory analyses
+
+
+
+library(clustertend)
+library(hopkins)#test if there is cluster tendency (randomness test)
+
+library(clusterability) #test if there is cluster tendency (unimodality test)
+
+
+library(fpc) #cluster methods
+
+library(NbClust) #a package dedicated to the estimation of the optimal number of clusters (30 different methods)
+
+
+library(ggplot2)
+   library(effects)
+    library(ggeffects) #visualization of effects for multinomial models
+
+
+
+
+library(nnet) 
+library(VGAM) #multinomial models
+
+library(car) #Anova tests
+
+library(lsmeans) #pairwise post hoc comparisons for multinomial model
+
+
+
+library(ggalluvial) #produce alluvial plot
+
+library(Polychrome) #create color palette
+
+
+library(igraph) 
+library(ggnetwork)#graph plots and analyses
+
+
+
+library(tsna) #visualization of temporal network
+library(ndtv) #analyses on dynamic networks
+```
+
+
+
+
+
+##Classification into tactics
+
+
+
+Using the dataset (data_trip) describing trip level vessels' behaviors, we produce a classification of these fishing trip into tactics using clustering methods (and other subclassifications).
+
+
+
+
+
+
+
+### Factor Analysis of Mixed Data
+
+```{r Factor Analysis of Mixed Data, eval=FALSE}
+
+setwd("~/Data/SACROIS")
+
+data_trip=readRDS("data_trip.rds")
+
+
+
+
+
+
+#warning: the multivariate analysis necessitate to remove NAs prior analysis, we will start with a simplified analysis implying only values for which no data is missing at the trip scale 
+
+
+
+setDF(data_trip)
+
+
+#1) Classification with all existing vessels (all variables with no missing data at the trip scale)
+
+
+data_trip_all=data_trip[,!sapply(data_trip,anyNA)] # keep only information about location (ICES division, ZEE), engines and temporality
+
+
+
+
+
+#too few data to be exploitable
+
+
+
+
+
+
+
+
+
+#2) Classification with most of existing trips (all variables with <1% of missing data at the trip scale, driving to <1% of fishing trips discarded in 2000-2022, for sub-sub-fleet 58.3.3)
+
+
+
+
+
+
+
+data_trip_most=data_trip[,sapply(data_trip, function(x) sum(is.na(x))/length(x)<0.01 )] # for sub-sub-fleet 58.3.3 (2000-2022, Nbclust=88): keep information about location (ICES div, ZEE, statistic rectangle, gradient), engines (type and mesh size), temporality,  BUT no information on fished taxa , weight, economic value
+
+
+
+data_trip_most=na.omit(data_trip_most) #To be noticed a non-negligible amount of vessels are not considered due to partial missing data (~5% in 2021), maybe a first classification using only non-missing data variable should be needed (NO: too noisy...)
+
+
+
+
+
+
+#selection by retaining minimal information requirement:
+
+setDT(data_trip)
+
+data_trip_most=data_trip[!is.na(value_weight_trip) & !is.na(value_weight_average_seq) & !is.na(value_eco_trip)  & !is.na(value_eco_average_seq) & !is.na(main_tax_spp_effort_fishing_sequence_trip) & !is.na(main_gear_type_effort_fishing_sequence_trip) & !is.na(main_spat_ICES_divis_effort_fishing_sequence_trip) & !is.na(main_spat_stat_rect_effort_fishing_sequence_trip),] #inclusion of trip variable because of particular case (with two years overlapping trip) due to attribution of the fishing trip to the year it begin
+
+setDF(data_trip)
+setDF(data_trip_most)
+data_trip_most=data_trip_most[,sapply(data_trip_most, function(x) !anyNA(x) )]
+
+#only ~1% of vessels discarded ! To be noticed: due to specific taxon, period or area descriptions, with only missing values for the descriptor
+
+
+
+
+
+
+#selection by removing progressively variables with the most NA values until reaching a threshold of discarded trip
+
+
+
+# i=0
+# remove=c()
+# #data_trip_most=na.omit(data_trip)
+# data_trip_most_i=data_trip[,sapply(data_trip, function(x) sum(is.na(x))/length(x)<0.02 )] #initialization to avoid too long computation time
+# 
+# setDT(data_trip_most_i)
+# 
+# freq_na=sapply(data_trip_most_i, function(x) sum(is.na(x))/length(x) )
+# 
+# data_trip_most=na.omit(data_trip_most_i)
+# 
+# while (length(data_trip_most[,MAREE_ID])/ length(data_trip[,1]) <0.97) {
+#   i=i+1;
+#   remove=c(remove, which(freq_na==sort(unique(freq_na), decreasing=T)[i]));
+#    data_trip_most=na.omit(data_trip_most_i[,-remove, with=F])
+# }
+# 
+# 
+# setDF(data_trip_most)
+# 
+# rm("freq_na", "remove", "data_trip_most_i")
+# gc()
+
+
+#almost equivalent to retaining only a strategic part of variables  (for sub-sub-fleet 58.3.3: 2000-2022, Nbclust=88)
+
+
+
+
+
+
+
+#selection by removing progressively fishing trips with the most NA values until reaching a threshold of discarded trips
+
+
+
+# 
+# freq_na=apply(data_trip, 1, function(x) sum(is.na(x)))
+# 
+# data_trip_most=data_trip[which(freq_na<=quantile(freq_na, probs =0.97)),]
+# 
+# 
+# data_trip_most=data_trip_most[,sapply(data_trip_most, function(x) !anyNA(x) )]
+
+
+#almost equivalent to retaining only a strategic part of variables  (for sub-sub-fleet 58.3.3: 2000-2022, Nbclust=88)
+
+
+
+
+
+
+
+
+#removal of constant variables:
+
+unique=apply(data_trip_most, 2 , function(x) length(unique(x)))
+
+data_trip_most=data_trip_most[,-which(unique==1)]
+
+
+data_trip_most[,sapply(data_trip_most,is.numeric)]=
+  as.data.frame(
+    scale(
+      data_trip_most[,sapply(data_trip_most,is.numeric)]
+      )
+    )
+#scaling continuous variables
+
+
+
+rownames(data_trip_most)<-data_trip_most$MAREE_ID
+
+
+
+
+
+
+#to be noticed number of possible dimensions = number of continuous variable + sum(number of categories in each categorical variable - 1) / unless more dimensions than individuals ! (in this case: number of individuals - 1)
+
+
+sum(sapply(data_trip_most[,!sapply(data_trip_most,is.numeric)], function(x) length(table(x))-1 )) #sum(number of categories in each categorical variable - 1)
+
+
+
+
+
+
+
+
+
+res.famd_trip_most <- FAMD(data_trip_most[,-1], ncp=4439, graph = FALSE) #mixed data factorial analysis
+
+
+fviz_screeplot(res.famd_trip_most) #plot of percentage of explained variance per dimension
+eig=res.famd_trip_most$eig #rather low percentage of explained variance
+
+#no use of dimensions >188 ? (more than 94 % of variance explained) if using Kaiser rule (all eigen value superior to 1)   (for sub-sub-fleet 58.3.3: 2000-2022, Nbclust=88)
+
+
+res.famd_trip_most <- FAMD(data_trip_most[,-1], ncp=188, graph = FALSE)
+
+
+
+
+
+
+
+
+
+res.famd_trip_most2 <- PCAmix(X.quanti=data_trip_most[,sapply(data_trip_most,is.numeric)],X.quali=data_trip_most[,!sapply(data_trip_most,is.numeric)][,-1],ndim=188, graph=FALSE, rename.level = T)
+
+res.famd_trip_most2$sqload #squared loadings (give the variable contribution importance to the different axes)
+
+# to statistically test using bootstrap and permutation tests ?
+
+
+
+
+
+fviz_famd_var (res.famd_trip_most, repel = TRUE)
+fviz_famd_var (res.famd_trip_most, axes=c(3,4), repel = TRUE)#graphs of variables, not really informative given the explained variance
+
+
+
+# Contribution to dimensions (again poorly informative)
+fviz_contrib (res.famd_trip_most, "var", axes = 1)
+fviz_contrib (res.famd_trip_most, "var", axes = 2)
+fviz_contrib (res.famd_trip_most, "var", axes = 3)
+fviz_contrib (res.famd_trip_most, "var", axes = 4)
+
+
+
+
+
+quanti.var <- get_famd_var(res.famd_trip_most, "quanti.var")
+
+fviz_famd_var(res.famd_trip_most, "quanti.var", repel = TRUE,
+              col.var = "black")
+fviz_famd_var(res.famd_trip_most, "quanti.var", axes = c(3,4), repel = TRUE,
+              col.var = "black") #graph of variables for continuous variables
+
+
+
+
+
+
+ fviz_famd_ind(res.famd_trip_most, invisible = "quali.var")
+  fviz_famd_ind(res.famd_trip_most, axes=c(3,4), invisible = "quali.var") 
+
+
+  
+  #testing presence of outliers using Mahalanobis robust distance and Tukey's test ?
+  
+
+
+
+
+
+
+
+cor=cor(data_trip_most[,sapply(data_trip_most,is.numeric)]) # correlation matrix of continuous data
+
+corrplot(cor, type="upper", order="hclust", tl.col="black", tl.srt=45) #visualizing correlations between continuous variables: correlations are localized to precise subset => a global factor analysis questionable ??? (alternative factor analysis by thematic groups or selecting variables representative of thematic groups)
+
+
+
+#exploration of cluster structure:
+
+
+fviz_dist(dist(res.famd_trip_most$ind$coord), show_labels = FALSE) #structure difficult to assess
+get_clust_tendency(res.famd_trip_most$ind$coord, n= round(nrow(res.famd_trip_most$ind$coord)*0.1))
+
+# library(clustertend) 
+# hopkins(res.famd_trip_most$ind$coord, n = nrow(res.famd_trip_most$ind$coord)-1)
+#very clear cluster structure of data through hopkins index
+
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+### Hierarchical clustering
+
+```{r Hierarchical clustering, eval=FALSE}
+
+
+
+
+
+
+
+###### Using most vessels
+
+
+
+## From FAMD 
+
+
+
+
+
+
+#a) Estimating the optimal number of cluster:
+
+
+#To be noticed the used hcpc method consist in a kmean clustering initialized with the results of a hierarchical clustering. As such the results is closed to a hierarchical clustering, with slight modification due to the kmean refining. Such methods is mot available in the "fpc" package, we will approximate our clusters by hierarchical clustering and kmean clustering when using "fpc"
+
+
+
+
+
+#optimal number of cluster using Tibshirani and Walther (2005) method (optimization of prediction strength) and kmean classification:
+
+
+opt_pred_kmean_most=
+  prediction.strength(xdata=res.famd_most$ind$coord, Gmin=2, Gmax=100, M=50,
+                    clustermethod=kmeansCBI,
+                    classification="centroid", centroidname = NULL,
+                    cutoff=0.8, distances=FALSE, count=TRUE)
+
+#prediction constantly decreasing with cluster numbers... (opt=2)
+
+
+
+#using hierarchical clustering (with average linkage clustering):
+
+
+# opt_pred_hclust_most=
+#   prediction.strength(xdata=res.famd_most$ind$coord, Gmin=2, Gmax=3, M=50,
+#                     clustermethod=hclustCBI, method="average",
+#                     classification="averagedist", centroidname = NULL,
+#                     cutoff=0.8, distances=FALSE, count=FALSE)
+
+#time of computation extremely long for hierarchical clustering !!!!!
+
+
+
+
+#optimal number of cluster using Fang and Wang (2012) method (optimization of cluster stability) and kmean classification:
+
+
+
+
+opt_boot_kmean_most=
+  nselectboot(res.famd_trip_most$ind$coord,B=50,distances=FALSE,
+clustermethod=kmeansCBI,
+classification="centroid",centroidname = NULL,
+krange=2:100, count=TRUE,
+largeisgood=FALSE)
+# for sub-sub-fleet 58.3.3: almost 1h of computation
+
+
+
+#using hierarchical clustering (with average linkage clustering):
+
+
+# opt_boot_hclust_most=
+#   nselectboot(res.famd_most$ind$coord,B=50,distances=FALSE,
+# clustermethod=hclustCBI, method="average",
+# classification="averagedist",centroidname = NULL,
+# krange=2:200, count=FALSE,
+# largeisgood=FALSE)
+
+#time of computation extremely long for hierarchical clustering !!!!!
+
+
+
+
+plot(predict(smooth.spline(5:100, opt_boot_kmean_most$stabk[-c(1:4)]), 5:100, deriv = 1))
+plot(predict(smooth.spline(5:100, opt_boot_kmean_most$stabk[-c(1:4)]), 5:100, deriv = 2))
+
+
+# first "burst" until N=13 (but not so visible) / stabilization at N=38 (for sub-sub-fleet 58.3.3: 2000-2022, Nbclust=88)
+
+
+
+
+
+
+
+
+
+
+
+#other methods (estimation by Ratkowsky index):
+
+
+
+
+NbClust_ratkowsky=NbClust(data = as.data.frame(res.famd_trip_most$ind$coord), diss = NULL, distance = "euclidean", min.nc = 2, max.nc = 100,
+                          method = "kmeans", index = "ratkowsky", alphaBeale = 0.1)
+
+
+
+#important to notice, when looking at the derivate of the ratkowsky estimates we obtained a first burst until n=13, but no clear stabilization (oscillation from N=38) :
+
+plot(predict(smooth.spline(4:100, NbClust_ratkowsky$All.index[-c(1,2)]), 4:100, deriv = 1))
+plot(predict(smooth.spline(4:100, NbClust_ratkowsky$All.index[-c(1,2)]), 4:100, deriv = 2))
+
+
+#These results are rather consistent with what is obtained  through stability 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#######definitive: stab method (stabilized)
+
+
+
+
+
+res.hcpc_trip_most_burst_18 <- HCPC (res.famd_trip_most, graph = FALSE, nb.clust=18)
+
+
+res.hcpc_trip_most_plateau_38 <- HCPC (res.famd_trip_most, graph = FALSE, nb.clust=38)
+
+
+
+
+
+
+fviz_dend(res.hcpc_most_no_vessel_stabk2, 
+          cex = 0.7,                     # Taille du text
+          palette = "jco",               # Palette de couleur ?ggpubr::ggpar
+          rect = TRUE, rect_fill = TRUE, # Rectangle autour des groupes
+          rect_border = "jco",           # Couleur du rectangle
+          labels_track_height = 0.8      # Augment l'espace pour le texte
+          )
+
+
+
+
+
+
+fviz_cluster(res.hcpc_most_no_vessel_stabk2, geom = "point",
+             repel = TRUE,            # Evite le chevauchement des textes
+             show.clust.cent = TRUE, # Montre le centre des clusters
+             palette = "jco",         # Palette de couleurs, voir ?ggpubr::ggpar
+             ggtheme = theme_minimal(),
+             main = "Factor map"
+)
+
+
+
+fviz_cluster(res.hcpc_most_no_vessel_stabk2, geom = "point", axes=c(3,4),
+             repel = TRUE,            # Evite le chevauchement des textes
+             show.clust.cent = TRUE, # Montre le centre des clusters
+             palette = "jco",         # Palette de couleurs, voir ?ggpubr::ggpar
+             ggtheme = theme_minimal(),
+             main = "Factor map"
+)
+
+
+
+
+
+
+
+
+
+#plot(res.hcpc, choice = "3D.map")
+#not adapted to the huge amount of data here
+
+
+
+
+res.hcpc$desc.axes$quanti #test by multivariate analysis axes
+
+res.hcpc$desc.var #test by variable
+
+
+res.hcpc$data.clust # resulting clusters
+
+
+
+
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+###Interpretation of clusters
+
+
+```{r interpretation of clusters}
+
+#interpretation code:
+
+# the aim is here to describe each cluster by identifying the categories most associated to each of them, and by comparing quantitatively clusters to extract quantitative descriptors   
+
+#we first filter variables by retaining only the ones with significant (p<0.05) chi-squared test (for qualitative variables) or mean comparison test (for quantitative variable, to the overall mean)
+
+# we then considered denominators function of degrees of determinants (what define best the cluster) 
+
+# Mod/Cla >95:"" clusters
+# 95>Mod/Cla>80: clusters with a strong predominance of ""
+# 80>Mod/Cla>65: clusters with a predominance of ""
+# 65>Mod/Cla>50: clusters with a majority of ""
+# 50>Mod/Cla>35: clusters with a strong "" component
+# 35>Mod/Cla>20: clusters with a "" component
+# 20>Mod/Cla>5: clusters with a minor "" component
+
+
+
+#we also consider the quantitative determinants of clusters by comparing significant quantitative variables between the cluster of interest and all other cluster (in term of standard deviation distance between the mean of interest and all other means)
+
+
+# distance >2sd : cluster with very high ""
+# distance >sd : cluster with high ""
+
+
+
+#we considered variable by themes (fishing weight, economic value, main fished taxa etc.), we recordedhow each themes are distributed into denominators and conserve only the highest denominator where the them appeared
+
+
+
+
+###### Qualitative and quantitative determinants:
+
+
+
+
+L_def=list(
+  determinant=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, gear_type=NA, mesh_size=NA, dimension=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, gradient=NA, month=NA, trimester=NA) ,
+  
+       strongly_predominant=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, gear_type=NA, mesh_size=NA, dimension=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, gradient=NA, month=NA, trimester=NA) ,
+  
+          predominant=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, gear_type=NA, mesh_size=NA, dimension=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, gradient=NA, month=NA, trimester=NA) ,
+  
+              major=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, gear_type=NA, mesh_size=NA, dimension=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, gradient=NA, month=NA, trimester=NA) ,
+  
+                  strong_component=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, gear_type=NA, mesh_size=NA, dimension=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, gradient=NA, month=NA, trimester=NA) ,
+  
+                        component=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, gear_type=NA, mesh_size=NA, dimension=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, gradient=NA, month=NA, trimester=NA) ,
+  
+                            minor_component=list( main_spe=NA, main_spp=NA, main_family=NA, main_order=NA, main_isscaap=NA, stock=NA, second_spe=NA, second_spp=NA, second_family=NA, second_order=NA, second_isscaap=NA, third_spe=NA, third_spp=NA, third_family=NA, third_order=NA, third_isscaap=NA, gear_type=NA, mesh_size=NA, dimension=NA, ZEE=NA, ICES=NA, stat_rect=NA, substat_rect=NA, gradient=NA, month=NA, trimester=NA),
+        
+                                very_high_values=list( value_weight=NA, value_eco=NA, value_effort=NA, value_weight.prod=NA, value_eco.prod=NA, sd_weight=NA, sd_eco=NA, sd_effort=NA, sd_weight.prod=NA, sd_eco.prod=NA, div_val_spe=NA, div_sde_spe=NA, div_val_spp=NA, div_sde_spp=NA, div_val_family=NA, div_sde_family=NA, div_val_order=NA, div_sde_order=NA, div_val_isscaap=NA, div_sde_isscaap=NA, main_prop_spe=NA, propor_sde_spe=NA, second_spe=NA, third_spe=NA, main_prop_spp=NA, propor_sde_spp=NA, second_spp=NA, third_spp=NA, main_prop_family=NA, propor_sde_family=NA, second_family=NA, third_family=NA, main_prop_order=NA, propor_sde_order=NA, second_order=NA, third_order=NA,  main_prop_isscaap=NA, propor_sde_isscaap=NA, second_isscaap=NA, third_isscaap=NA, div_val_gear_type=NA, div_sde_gear_type=NA, prop_gear_type=NA, propor_sde_gear_type=NA, div_val_dimension=NA, div_sde_dimension=NA, prop_dimension=NA, propor_sde_dimension=NA, div_val_mesh_size=NA, div_sde_mesh_size=NA, prop_mesh_size=NA, propor_sde_mesh_size=NA, value_mesh_size=NA, sd_mesh_size=NA, div_val_zee=NA, div_sde_zee=NA, prop_zee=NA, propor_sde_zee=NA, div_val_gradient=NA, div_sde_gradient=NA, prop_gradient=NA, propor_sde_gradient=NA, div_val_ICES_divis=NA, div_sde_ICES_divis=NA, prop_ICES_divis=NA, propor_sde_ICES_divis=NA, div_val_stat_rect=NA, div_sde_stat_rect=NA, prop_stat_rect=NA, propor_sde_stat_rect=NA, div_val_stat_subrect=NA, div_sde_stat_subrect=NA, prop_stat_subrect=NA, propor_sde_stat_subrect=NA, div_nb_effort=NA, div_nb_day=NA, prop_month=NA, propor_sde_month=NA, prop_trimester=NA, propor_sde_trimester=NA, value_temp=NA, sd_temp=NA),
+  
+                                    high_values=list( value_weight=NA, value_eco=NA, value_effort=NA, value_weight.prod=NA, value_eco.prod=NA, sd_weight=NA, sd_eco=NA, sd_effort=NA, sd_weight.prod=NA, sd_eco.prod=NA, div_val_spe=NA, div_sde_spe=NA, div_val_spp=NA, div_sde_spp=NA, div_val_family=NA, div_sde_family=NA, div_val_order=NA, div_sde_order=NA, div_val_isscaap=NA, div_sde_isscaap=NA, main_prop_spe=NA, propor_sde_spe=NA, second_spe=NA, third_spe=NA, main_prop_spp=NA, propor_sde_spp=NA, second_spp=NA, third_spp=NA, main_prop_family=NA, propor_sde_family=NA, second_family=NA, third_family=NA, main_prop_order=NA, propor_sde_order=NA, second_order=NA, third_order=NA,  main_prop_isscaap=NA, propor_sde_isscaap=NA, second_isscaap=NA, third_isscaap=NA, div_val_gear_type=NA, div_sde_gear_type=NA, prop_gear_type=NA, propor_sde_gear_type=NA, div_val_dimension=NA, div_sde_dimension=NA, prop_dimension=NA, propor_sde_dimension=NA, div_val_mesh_size=NA, div_sde_mesh_size=NA, prop_mesh_size=NA, propor_sde_mesh_size=NA, value_mesh_size=NA, sd_mesh_size=NA, div_val_zee=NA, div_sde_zee=NA, prop_zee=NA, propor_sde_zee=NA, div_val_gradient=NA, div_sde_gradient=NA, prop_gradient=NA, propor_sde_gradient=NA, div_val_ICES_divis=NA, div_sde_ICES_divis=NA, prop_ICES_divis=NA, propor_sde_ICES_divis=NA, div_val_stat_rect=NA, div_sde_stat_rect=NA, prop_stat_rect=NA, propor_sde_stat_rect=NA, div_val_stat_subrect=NA, div_sde_stat_subrect=NA, prop_stat_subrect=NA, propor_sde_stat_subrect=NA, div_nb_effort=NA, div_nb_day=NA, prop_month=NA, propor_sde_month=NA, prop_trimester=NA, propor_sde_trimester=NA, value_temp=NA, sd_temp=NA), 
+  
+                                         very_high_values_cat= list( SPE=NA, SPP=NA, FAMILY=NA, ORDER=NA, ISSCAAP=NA),
+                                         
+                                                high_values_cat= list( SPE=NA, SPP=NA, FAMILY=NA, ORDER=NA, ISSCAAP=NA) )
+
+
+
+
+
+  for (j in unique(res.hcpc_trip$data.clust$clust)) {
+    
+desc=as.data.frame(res.hcpc_trip$desc.var$category[[j]]);
+x=L_def;
+
+if (dim(desc)[1]!=0) {
+
+desc$det=0;
+desc$det[desc$`Mod/Cla`>95]=1
+desc$det[desc$`Mod/Cla`>80 & desc$`Mod/Cla`<=95]=2;
+desc$det[desc$`Mod/Cla`>65 & desc$`Mod/Cla`<=80]=3;
+desc$det[desc$`Mod/Cla`>50 & desc$`Mod/Cla`<=65]=4;
+desc$det[desc$`Mod/Cla`>35 & desc$`Mod/Cla`<=50]=5;
+desc$det[desc$`Mod/Cla`>20 & desc$`Mod/Cla`<=35]=6;
+desc$det[desc$`Mod/Cla`>5 & desc$`Mod/Cla`<=20]=7;
+
+
+
+desc$names=str_split_fixed(rownames(desc), pattern="=", n=2)[,1];
+desc$cat=str_split_fixed(rownames(desc), pattern="=", n=2)[,2];
+
+
+
+desc=desc[,c("det","names","cat")];
+
+
+desc=desc[desc$det!=0,];
+desc=desc[order(desc$det),];
+desc=desc[!duplicated(desc$cat),];
+
+
+
+
+for (k in 1:7) {
+  if (length(desc$names)!=0) {
+    for (l in 1:length(names(L_def[[k]]))) {
+      if (length(desc[sapply(str_split(desc$names, pattern="_"), function(x) all(unlist(str_split(names(L_def[[k]])[l], pattern="_")) %in% x)) & desc$det==k,]$cat)!=0) {
+        x[[k]][[l]]=desc[sapply(str_split(desc$names, pattern="_"), function(x) all(unlist(str_split(names(L_def[[k]])[l], pattern="_")) %in% x)) & desc$det==k,]$cat
+   }
+ } 
+}}
+
+};
+
+# Quantitative determinants:
+
+
+desc=as.data.frame(res.hcpc_trip$desc.var$quanti[[j]]);
+
+
+
+if (dim(desc)[1]!=0) {
+
+desc$pop.mean=(-desc$`Mean in category`*sum(res.hcpc_trip$data.clust$clust==j))/(length(res.hcpc_trip$data.clust$clust)-sum(res.hcpc_trip$data.clust$clust==j));
+
+
+
+desc$det=0;
+
+desc$det[desc$`Mean in category`-desc$pop.mean>2*desc$`sd in category`]=8;
+
+desc$det[desc$`Mean in category`-desc$pop.mean>desc$`sd in category` & desc$det!=1]=9;
+
+
+desc$names=rownames(desc);
+
+
+desc=desc[,c("det","names")];
+
+
+desc=desc[desc$det!=0,];
+desc=desc[order(desc$det),];
+
+
+
+
+
+for (k in 8:9) {
+  if (length(desc$names)!=0) {
+  for (l in 1:length(names(L_def[[k]]))) {
+   if ("second" %in% unlist(str_split(names(L_def[[k]])[l], pattern="_")) | "third" %in% unlist(str_split(names(L_def[[k]])[l], pattern="_"))) {
+     if (length(desc[sapply(str_split(desc$names, pattern="_"), function(x) all(unlist(str_split(names(L_def[[k]])[l], pattern="_")) %in% x)) & desc$det==k,]$names)!=0) {
+        x[[k]][[l]]=TRUE
+     }}
+     else { #necessity to distinguish quantitative variable on main categories and those on secondary categories
+        if (length(desc[sapply(str_split(desc$names, pattern="_"), function(x) ( all(unlist(str_split(names(L_def[[k]])[l], pattern="_")) %in% x)) & !("second" %in% x | "third" %in% x) ) & desc$det==k,]$names)!=0) {
+        x[[k]][[l]]=TRUE
+        }
+     }
+   }
+ }} ; #return TRUE if the quantitative variable have higher values for the cluster of interest (more than a sd difference between the cluster mean and other clusters mean)
+
+
+
+
+for (k in 10:11) {
+ for (l in 1:length(names(L_def[[k]]))) {
+   if (sum(grepl(pattern=paste0("^", names(L_def[[k]])[l]), desc[desc$det==k-2,]$names))>0) {
+        x[[k]][[l]]=sapply(
+          lapply(
+            str_split(
+              desc[grepl(pattern=paste0("^", names(L_def[[k]])[l]), desc$names) & desc$det==k-2,]$names, pattern="_"),
+                function(x) x=x[!(x %in% c("seq","average","prop"))]),
+                  function(x) x[length(x)])
+   }
+ } 
+} #return the categories whose associated values (weight, eco, effort, proportion) is higher in the focal cluster than in other ones (more than a sd difference between the cluster mean and other clusters mean)
+
+};
+
+
+
+for (k in 1:5) {
+  x[[10]][[k]]=x[[10]][[k]][!duplicated(x[[10]][[k]])];
+  x[[11]][[k]]=x[[11]][[k]][!duplicated(x[[11]][[k]])]
+}
+
+
+for (k in 1:5) {
+  x[[11]][[k]]=x[[11]][[k]][sapply(x[[11]][[k]], function(y) !(y %in% unlist(x)[[10]]) )]
+}
+
+
+for (k in 1:11) {
+    x[[k]]=x[[k]][sapply(x[[k]], function(x) all(!is.na(x)))]
+};
+
+
+
+
+if (length(x[[9]])!=0) {
+  x[[9]]= x[[9]][sapply(names(x[[9]]), function(y) !(y %in% names(x[[8]])))] #avoid repetition between qualitative variables describing the cluster (only the higher order of magnitude is kept)
+}
+
+
+
+
+
+
+
+
+
+         assign(paste("L_def", j, sep="_"), x)
+         
+         rm(x)
+         
+         gc()
+
+
+  }
+
+
+
+
+
+
+
+res.hcpc_trip_most$data.clust$MAREE_ID=rownames(res.hcpc_trip_most$data.clust)
+
+
+
+data_trip=merge(data_trip, res.hcpc_trip_most$data.clust[,c("MAREE_ID","clust")])
+
+
+
+```
+
+
+
+
+
+###Distribution of dolphin bycatch in clusters
+
+
+
+
+```{r distribution of dolphin bycatch}
+
+DCO_DECL_BYC=readRDS("DCO_DECL_BYC.rds")
+
+DCO_DECL_BYC[,MAREE_ID:=as.character(MAREE_ID)]
+
+
+
+
+DCO_DECL_BYC=merge(DCO_DECL_BYC, data_trip[, c("MAREE_ID", "clust")], all.x = T, all.y=F)
+
+
+
+
+table(DCO_DECL_BYC$clust)
+
+ggplot(DCO_DECL_BYC, aes(clust)) +
+    geom_bar()
+
+
+
+
+
+
+OBSMER_BYC=readRDS("OBSMER_BYC_simp.rds")
+
+OBSMER_BYC[,MAREE_ID:=as.character(MAREE_ID)]
+
+
+
+
+OBSMER_BYC=merge(OBSMER_BYC, data_trip[, c("MAREE_ID", "clust")], all.x = T, all.y=F, by="MAREE_ID")
+
+
+
+
+table(OBSMER_BYC$clust)
+
+ggplot(OBSMER_BYC, aes(clust)) +
+    geom_bar()
+
+
+```
+
+
+
+
+
+
+
+
+
+
